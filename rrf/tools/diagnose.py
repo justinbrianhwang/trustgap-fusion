@@ -12,7 +12,7 @@ from scipy.stats import spearmanr
 
 from rrf import data, evaluate, metrics, upstream
 from rrf.config import load_config
-from rrf.diag_common import GateTemporalAccumulator, GateXfitAccumulator
+from rrf.diag_common import GateTemporalAccumulator, GateXfitAccumulator, partial_summary
 from rrf.gated import VIEW_MODALITY, assemble, tokenize
 from rrf.probes import q_targets, q_targets_relative, reference_error
 from rrf.stats import episode_bootstrap_ci
@@ -34,6 +34,7 @@ REDUCED_NAMES = (
     "lidar_silent_empty",
 )
 GRID = (0.05, 0.2, 0.5, 1.0)
+PARTIAL_FACTORS = (0.5, 0.8, 1.25, 2.0)
 TRACE_GRID = (0.05, 0.1, 0.2, 0.5, 1.0)
 _LOADER_WORKERS = 4
 
@@ -279,7 +280,45 @@ def run_utility(gate, reference, cfg, split, ids, suite, targets, out_dir, devic
                                      full_balanced_squared_error=float(full_bse[i]), balanced_squared_error=float(bse[i]),
                                      utility=utility, neg_utility=-utility))
     _write_csv(out_dir / "utility.csv", rows)
-    return {"correlations": _utility_summary(rows, seed), "ap": _ap_summary(scores, labels)}
+    return {"label": "removal utility", "role": "sensitivity",
+            "correlations": _utility_summary(rows, seed), "ap": _ap_summary(scores, labels)}
+
+
+@torch.no_grad()
+def run_partial(gate, reference, cfg, ids, suite, targets, out_dir, device,
+                batch_size, seed):
+    """Measure local loss changes when one learned quality is scaled at a time."""
+    rows = []
+    for condition, spec in suite.items():
+        for item in _loader(cfg["paths"]["dataset_root"], ids, spec,
+                            cfg["corruption"]["base_seed"], batch_size):
+            batch_ids, batch = item["sample_id"], _model_batch(item, device)
+            target, fg = _truth(batch_ids, targets, device)
+            full = gate(batch)
+            full_native, full_bse = prediction_losses(full["traffic"], target, fg)
+            _, errors = q_targets(reference, batch, fg, cfg["reliability"]["tau_quality"])
+            bases = _base_rows(batch_ids, condition, spec, cfg["corruption"], fg)
+            for modality_index, modality in enumerate(("camera", "lidar")):
+                for factor in PARTIAL_FACTORS:
+                    q = full["q"].clone()
+                    q[:, modality_index] = (q[:, modality_index] * factor).clamp(gate.eps, 1.0)
+                    output = gate(batch, q_override=q)
+                    native, bse = prediction_losses(output["traffic"], target, fg)
+                    for index, base in enumerate(bases):
+                        rows.append(dict(
+                            base, modality=modality, factor=factor,
+                            q=float(full["q"][index, modality_index]),
+                            intervened_q=float(q[index, modality_index]),
+                            E=float(errors[index, modality_index]),
+                            full_native_score_loss=float(full_native[index]),
+                            native_score_loss=float(native[index]),
+                            delta_native_score_loss=float(native[index] - full_native[index]),
+                            full_balanced_squared_error=float(full_bse[index]),
+                            balanced_squared_error=float(bse[index]),
+                            delta_balanced_squared_error=float(bse[index] - full_bse[index])))
+    _write_csv(out_dir / "partial.csv", rows)
+    return {"foreground_by_kind": partial_summary(
+        rows, ("native_score_loss", "balanced_squared_error"), seed)}
 
 
 def _ap_summary(score_store, label_store):
@@ -326,6 +365,7 @@ def run_oracle_gate(gate, cfg, ids, suite, targets, out_dir, device, batch_size,
     loss_sum, loss_count = Counter(), Counter()
     oracle_ap, neutral_ap = {}, {}
     chosen = Counter()
+    learned_loss_violations = 0
     add_temporal = temporal is not None and not temporal.has_data
     for condition, spec in suite.items():
         condition_labels, neutral_scores, oracle_scores = [], [], []
@@ -350,9 +390,18 @@ def run_oracle_gate(gate, cfg, ids, suite, targets, out_dir, device, batch_size,
                 for i, base in enumerate(bases):
                     rows.append(dict(base, variant=key, q_camera=q_cam, q_lidar=q_lidar,
                                      native_score_loss=float(native[i]), balanced_squared_error=float(bse[i]), selected=False))
+            learned_output = gate(batch)
+            learned_native, learned_bse = prediction_losses(learned_output["traffic"], target, fg)
+            batch_outputs.append(learned_output["traffic"][..., 0].cpu().numpy())
+            batch_losses.append(learned_native)
+            for i, base in enumerate(bases):
+                rows.append(dict(base, variant="learned_q",
+                                 q_camera=float(learned_output["q"][i, 0]),
+                                 q_lidar=float(learned_output["q"][i, 1]),
+                                 native_score_loss=float(learned_native[i]),
+                                 balanced_squared_error=float(learned_bse[i]), selected=False))
             loss_matrix = torch.stack(batch_losses, 1)
-            if xfit is not None or temporal is not None:
-                learned = gate(batch)["traffic"][..., 0].cpu().numpy()
+            learned = batch_outputs[-1]
             if xfit is not None:
                 xfit.add(condition, np.stack(batch_outputs), learned, target[..., 0].cpu().numpy())
             if add_temporal:
@@ -360,9 +409,13 @@ def run_oracle_gate(gate, cfg, ids, suite, targets, out_dir, device, batch_size,
                              torch.stack(batch_losses).cpu().numpy(), learned,
                              target[..., 0].cpu().numpy())
             best = loss_matrix.argmin(1).cpu().numpy()
+            violations = loss_matrix.min(1).values > learned_native + 1e-8
+            learned_loss_violations += int(violations.sum())
+            assert not violations.any(), "in-sample oracle loss exceeded learned-q loss"
             for i, ci in enumerate(best):
                 rows[row_start + int(ci) * len(batch_ids) + i]["selected"] = True
-                key = f"{candidates[ci][0]:g},{candidates[ci][1]:g}"
+                key = ("learned_q" if ci == len(candidates)
+                       else f"{candidates[ci][0]:g},{candidates[ci][1]:g}")
                 chosen[(_condition_fields(condition, spec, cfg["corruption"])["kind"], key)] += 1
                 oracle_scores.append(batch_outputs[ci][i].ravel())
         oracle_ap[condition] = _ap(oracle_scores, condition_labels)
@@ -390,6 +443,7 @@ def run_oracle_gate(gate, cfg, ids, suite, targets, out_dir, device, batch_size,
         "best_fixed_candidate": best_fixed,
         "best_fixed_mean_native_score_loss": loss_sum[best_fixed] / loss_count[best_fixed],
         "best_fixed_ap": best_fixed_ap,
+        "in_sample_oracle_learned_loss_violations": learned_loss_violations,
         "chosen_histogram_by_kind": {kind: {key: count for (k, key), count in chosen.items() if k == kind}
                                      for kind in sorted({k for k, _ in chosen})},
     }
@@ -414,7 +468,11 @@ def run_oracle_gate_xfit(gate, cfg, ids, suite, targets, device, batch_size, xfi
                     outputs.append(output[..., 0].cpu().numpy())
                     if temporal is not None:
                         losses.append(per_sample_native_score(output, target))
-                learned = gate(batch)["traffic"][..., 0].cpu().numpy()
+                learned_output = gate(batch)["traffic"]
+                learned = learned_output[..., 0].cpu().numpy()
+                outputs.append(learned)
+                if temporal is not None:
+                    losses.append(per_sample_native_score(learned_output, target))
                 xfit.add(condition, np.stack(outputs), learned, target[..., 0].cpu().numpy())
                 if add_temporal:
                     temporal.add(condition, batch_ids, np.stack(outputs),
@@ -458,7 +516,10 @@ def run_oracle_gate_temporal(gate, cfg, ids, suite, targets, device, batch_size,
                     output = gate(batch, q_override=q)["traffic"]
                     outputs.append(output[..., 0].cpu().numpy())
                     losses.append(per_sample_native_score(output, target))
-                learned = gate(batch)["traffic"][..., 0].cpu().numpy()
+                learned_output = gate(batch)["traffic"]
+                learned = learned_output[..., 0].cpu().numpy()
+                outputs.append(learned)
+                losses.append(per_sample_native_score(learned_output, target))
                 temporal.add(condition, batch_ids, np.stack(outputs),
                              torch.stack(losses).cpu().numpy(), learned,
                              target[..., 0].cpu().numpy())
@@ -589,16 +650,16 @@ def main():
     if args.frame_stride < 1:
         ap.error("--frame-stride must be >= 1")
     analyses = [x.strip() for x in args.analyses.split(",") if x.strip()]
-    allowed = {"utility", "oracle_rel", "oracle_gate", "oracle_gate_xfit",
+    allowed = {"utility", "partial", "oracle_rel", "oracle_gate", "oracle_gate_xfit",
                "oracle_gate_temporal", "shuffle", "trace"}
     unknown = set(analyses) - allowed
     if unknown:
         ap.error(f"unknown analyses: {sorted(unknown)}")
     if "oracle_gate_temporal" in analyses:
         analyses = [name for name in analyses if name != "oracle_gate_temporal"] + ["oracle_gate_temporal"]
-    gated_only = {"oracle_rel", "oracle_gate", "oracle_gate_xfit",
+    gated_only = {"partial", "oracle_rel", "oracle_gate", "oracle_gate_xfit",
                   "oracle_gate_temporal", "shuffle", "trace"}
-    diagnostic_gated = set(GATED_METHODS) | {"B3", "B4"}
+    diagnostic_gated = set(GATED_METHODS) | {"B3", "B3A", "B4"}
     if set(analyses) & gated_only and args.method not in diagnostic_gated:
         ap.error(f"{sorted(set(analyses) & gated_only)} require a gated method, got {args.method}")
 
@@ -612,11 +673,11 @@ def main():
     gate, provenance = load_method(cfg, args.method, args.seed, device)
     gate._diagnose_method = args.method
     gate.eval()
-    reference = load_reference(cfg, device) if set(analyses) & {"utility", "oracle_rel"} else None
+    reference = load_reference(cfg, device) if set(analyses) & {"utility", "partial", "oracle_rel"} else None
     out_dir = Path(cfg["paths"]["artifacts_root"]) / "diagnostics" / f"{args.method}_seed{args.seed}"
     out_dir.mkdir(parents=True, exist_ok=True)
     targets = {sid: torch.from_numpy(data.load_gt(cfg["paths"]["dataset_root"], sid)) for sid in ids}
-    candidates = [f"{a:g},{b:g}" for a in GRID for b in GRID]
+    candidates = [f"{a:g},{b:g}" for a in GRID for b in GRID] + ["learned_q"]
     xfit = (GateXfitAccumulator(400, candidates, candidates.index("1,1"), args.seed, "interfuser")
             if "oracle_gate_xfit" in analyses else None)
     temporal = (GateTemporalAccumulator(candidates, candidates.index("1,1"), "interfuser")
@@ -624,6 +685,8 @@ def main():
 
     runners = {
         "utility": lambda: run_utility(gate, reference, cfg, split, ids, suite, targets, out_dir, device, args.batch_size, args.seed),
+        "partial": lambda: run_partial(gate, reference, cfg, ids, suite, targets, out_dir,
+                                        device, args.batch_size, args.seed),
         "oracle_rel": lambda: run_oracle_rel(gate, reference, cfg, ids, suite, targets, out_dir, device, args.batch_size),
         "oracle_gate": lambda: run_oracle_gate(gate, cfg, ids, suite, targets, out_dir, device,
                                                 args.batch_size, xfit, temporal),

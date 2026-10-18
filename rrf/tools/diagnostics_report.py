@@ -1,4 +1,4 @@
-"""Combine InterFuser and TransFuser diagnostic outputs into three compact tables."""
+"""Combine InterFuser and TransFuser diagnostic outputs into compact tables."""
 import argparse
 import csv
 import json
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from rrf.diag_common import write_csv
+from rrf.diag_common import partial_summary, write_csv
 from rrf.stats import episode_bootstrap_ci
 
 
@@ -93,10 +93,13 @@ def _chain_rows(entries, repeats):
         identity = _identity(model, summary)
         utility = _read_csv(utility_path)
         foreground = [row for row in utility if row.get("fg_present", "").lower() == "true"]
-        groups = sorted({(row["variant"], row["modality"]) for row in foreground})
-        for removal_variant, modality in groups:
+        groups = sorted({(row["variant"], row.get("removal_level", ""), row["modality"])
+                         for row in foreground})
+        for removal_variant, removal_level, modality in groups:
             rows = [row for row in foreground
-                    if row["variant"] == removal_variant and row["modality"] == modality]
+                    if row["variant"] == removal_variant
+                    and row.get("removal_level", "") == removal_level
+                    and row["modality"] == modality]
             q_constant = len({row["q"] for row in rows}) < 2
             values = {}
             for prefix, left, right in (("q_neg_E", "q", "neg_E"),
@@ -110,7 +113,37 @@ def _chain_rows(entries, repeats):
                 values.update({prefix: _number(estimate), f"{prefix}_ci_low": _number(low),
                                f"{prefix}_ci_high": _number(high)})
             output.append(dict(identity, modality=modality, removal_variant=removal_variant,
+                               removal_level=removal_level,
                                n_frames=len(rows), **values))
+    return output
+
+
+def _partial_rows(entries, repeats):
+    output = []
+    for model, summary_path, _ in entries:
+        path = summary_path.with_name("partial.csv")
+        if not path.exists():
+            continue
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        identity = _identity(model, summary)
+        rows = _read_csv(path)
+        loss_names = sorted(key.removeprefix("delta_") for key in rows[0]
+                            if key.startswith("delta_"))
+        numeric = {"q", "E", "factor", *(f"delta_{name}" for name in loss_names)}
+        parsed = [{key: (float(value) if key in numeric else
+                         value.lower() == "true" if key == "fg_present" else value)
+                   for key, value in row.items()} for row in rows]
+        result = partial_summary(parsed, loss_names, int(summary.get("seed", 0)), repeats)
+        for kind, modalities in result.items():
+            for modality, losses in modalities.items():
+                for loss_name, statistics in losses.items():
+                    for statistic, ci in statistics.items():
+                        output.append(dict(identity, condition_kind=kind, modality=modality,
+                                           loss=loss_name, statistic=statistic,
+                                           estimate=_number(ci["estimate"]),
+                                           ci_low=_number(ci["ci_low"]),
+                                           ci_high=_number(ci["ci_high"]),
+                                           n_episodes=ci["n_episodes"], repeats=ci["repeats"]))
     return output
 
 
@@ -237,10 +270,11 @@ def _markdown_table(headers, rows):
 
 
 def _report(chain, gate, trace):
-    lines = ["# Chain links", ""]
+    lines = ["# Removal utility (sensitivity)", ""]
     lines += _markdown_table(
-        ["Model", "Method", "Seed", "Removal", "Modality", "ρ(q,−E)", "ρ(q,U)", "ρ(−E,U)"],
-        [[row["model"], row["method"], row["seed"], row["removal_variant"], row["modality"],
+        ["Model", "Method", "Seed", "Removal", "Level", "Modality", "ρ(q,−E)", "ρ(q,U)", "ρ(−E,U)"],
+        [[row["model"], row["method"], row["seed"], row["removal_variant"],
+          row["removal_level"], row["modality"],
           _correlation(row, "q_neg_E"), _correlation(row, "q_U"),
           _correlation(row, "neg_E_U")] for row in chain])
     lines += ["", "# Gate effect", ""]
@@ -274,8 +308,15 @@ def build_report(roots, out, repeats=2000):
         raise RuntimeError("no diagnostic summary.json + utility.csv pairs found")
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    chain, gate, trace = _chain_rows(entries, repeats), _gate_rows(entries), _trace_rows(entries)
+    chain, partial = _chain_rows(entries, repeats), _partial_rows(entries, repeats)
+    gate, trace = _gate_rows(entries), _trace_rows(entries)
     write_csv(out / "chain_links.csv", chain)
+    if partial:
+        write_csv(out / "partial.csv", partial)
+    else:
+        (out / "partial.csv").write_text(
+            "model,method,seed,variant,condition_kind,modality,loss,statistic,estimate,"
+            "ci_low,ci_high,n_episodes,repeats\n", encoding="utf-8")
     write_csv(out / "gate_effect.csv", gate)
     if trace:
         write_csv(out / "trace.csv", trace)
@@ -284,7 +325,7 @@ def build_report(roots, out, repeats=2000):
             "model,method,seed,variant,stage,layer,swept_modality,q_value,camera_attention_mass,"
             "lidar_attention_mass,mean_abs_delta_score,n_samples\n", encoding="utf-8")
     (out / "report.md").write_text(_report(chain, gate, trace), encoding="utf-8")
-    return {"diagnostic_runs": len(entries), "chain_links": len(chain),
+    return {"diagnostic_runs": len(entries), "chain_links": len(chain), "partial": len(partial),
             "gate_effect": len(gate), "trace": len(trace)}
 
 

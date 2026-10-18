@@ -6,6 +6,7 @@ import numpy as np
 
 from rrf.evaluate import full_suite
 from rrf.metrics import grid_fg_ap
+from rrf.stats import episode_bootstrap_ci
 
 
 REDUCED_NAMES = (
@@ -67,6 +68,63 @@ def merge_summary(path, summary):
     return summary
 
 
+def _rank(values):
+    values = np.asarray(values, dtype=np.float64)
+    order = np.argsort(values, kind="stable")
+    ranks = np.empty(len(values), dtype=np.float64)
+    start = 0
+    while start < len(values):
+        stop = start + 1
+        while stop < len(values) and values[order[stop]] == values[order[start]]:
+            stop += 1
+        ranks[order[start:stop]] = 0.5 * (start + stop - 1)
+        start = stop
+    return ranks
+
+
+def _spearman(rows, left, right):
+    x = np.asarray([float(row[left]) for row in rows])
+    y = np.asarray([float(row[right]) for row in rows])
+    if len(x) < 2 or np.ptp(x) == 0 or np.ptp(y) == 0:
+        return float("nan")
+    return float(np.corrcoef(_rank(x), _rank(y))[0, 1])
+
+
+def partial_summary(rows, loss_names, seed, repeats=2000):
+    """Summarize learned-q partial interventions on foreground-present frames by kind."""
+    foreground = [row for row in rows if row["fg_present"]]
+    output = {}
+    for kind in sorted({row["kind"] for row in foreground}):
+        output[kind] = {}
+        for modality in ("camera", "lidar"):
+            modality_rows = [row for row in foreground
+                             if row["kind"] == kind and row["modality"] == modality]
+            output[kind][modality] = {}
+            for loss_name in loss_names:
+                loss = {}
+                for factor in (0.5, 0.8):
+                    selected = [row for row in modality_rows if row["factor"] == factor]
+                    loss[f"fraction_lower_f{factor:g}"] = episode_bootstrap_ci(
+                        selected, lambda sample, field=f"delta_{loss_name}":
+                        float(np.mean([row[field] < 0 for row in sample])),
+                        n=repeats, seed=seed)
+                for prefix, field, factor in (
+                        ("q_vs_neg_delta_f0.5", "q", 0.5),
+                        ("q_vs_delta_f2", "q", 2.0),
+                        ("E_vs_neg_delta_f0.5", "E", 0.5),
+                        ("E_vs_delta_f2", "E", 2.0)):
+                    selected = [dict(row, correlation_delta=(
+                        -row[f"delta_{loss_name}"] if factor == 0.5
+                        else row[f"delta_{loss_name}"]))
+                        for row in modality_rows if row["factor"] == factor]
+                    loss[prefix] = episode_bootstrap_ci(
+                        selected, lambda sample, left=field:
+                        _spearman(sample, left, "correlation_delta"),
+                        n=repeats, seed=seed)
+                output[kind][modality][loss_name] = loss
+    return output
+
+
 class GateXfitAccumulator:
     """Accumulate cell-split gate-oracle scores without retaining every candidate grid."""
 
@@ -77,6 +135,8 @@ class GateXfitAccumulator:
         self.halves = (np.sort(order[:n_cells // 2]), np.sort(order[n_cells // 2:]))
         self.candidates = list(candidates)
         self.neutral_index = neutral_index
+        self.learned_index = (self.candidates.index("learned_q")
+                              if "learned_q" in self.candidates else None)
         self.seed = seed
         self.mode = mode
         self.loss_sums = np.zeros((2, len(candidates)), dtype=np.float64)
@@ -84,6 +144,7 @@ class GateXfitAccumulator:
         self.scores = {name: {} for name in ("learned", "neutral", "in_sample_oracle",
                                               "cross_fitted_oracle", "best_fixed")}
         self.labels = {}
+        self.learned_loss_violations = 0
 
     def _loss(self, scores, target, cells):
         scores = np.asarray(scores)[..., cells]
@@ -117,6 +178,11 @@ class GateXfitAccumulator:
         learned = np.asarray(learned_scores).reshape(len(target), -1)
         target = np.asarray(target).reshape(len(target), -1)
         losses = [self._loss(candidates, target, cells) for cells in self.halves]
+        if self.learned_index is not None:
+            violation = np.any(np.stack(losses).min(1) >
+                               np.stack(losses)[:, self.learned_index] + 1e-8, axis=0)
+            self.learned_loss_violations += int(violation.sum())
+            assert not violation.any(), "in-sample oracle loss exceeded learned-q loss"
         for selection_fold, evaluation_fold in ((0, 1), (1, 0)):
             evaluation_cells = self.halves[evaluation_fold]
             selected = losses[selection_fold].argmin(0)
@@ -139,7 +205,9 @@ class GateXfitAccumulator:
     def best_indices(self):
         if np.any(self.loss_counts == 0):
             raise RuntimeError("no candidate batches were accumulated")
-        return self.loss_sums.argmin(1)
+        fixed = [index for index in range(len(self.candidates))
+                 if index != self.learned_index]
+        return np.asarray(fixed)[self.loss_sums[:, fixed].argmin(1)]
 
     def add_fixed(self, condition, fold, scores, target):
         """Add scores for the fixed candidate selected on ``fold``'s selection cells."""
@@ -155,7 +223,8 @@ class GateXfitAccumulator:
                   "best_fixed_candidates": {
                       "A_to_B": self.candidates[int(self.best_indices[0])],
                       "B_to_A": self.candidates[int(self.best_indices[1])],
-                  }, "ap": {}, "selection_bias": {}}
+                  }, "ap": {}, "selection_bias": {},
+                  "in_sample_oracle_learned_loss_violations": self.learned_loss_violations}
         conditions = sorted(self.labels)
         for name, condition_scores in self.scores.items():
             output["ap"][name] = {}
@@ -183,6 +252,8 @@ class GateTemporalAccumulator:
             raise ValueError("mode must be 'interfuser' or 'transfuser'")
         self.candidates = list(candidates)
         self.neutral_index = neutral_index
+        self.learned_index = (self.candidates.index("learned_q")
+                              if "learned_q" in self.candidates else None)
         self.mode = mode
         self.loss_sums = np.zeros(len(candidates), dtype=np.float64)
         self.loss_count = 0
@@ -193,6 +264,7 @@ class GateTemporalAccumulator:
         self.target_payloads = {}
         self._previous = {}
         self._agreement = {}
+        self.learned_loss_violations = 0
 
     @property
     def has_data(self):
@@ -202,7 +274,9 @@ class GateTemporalAccumulator:
     def best_index(self):
         if not self.has_data:
             raise RuntimeError("no candidate batches were accumulated")
-        return int(self.loss_sums.argmin())
+        fixed = [index for index in range(len(self.candidates))
+                 if index != self.learned_index]
+        return int(fixed[int(self.loss_sums[fixed].argmin())])
 
     @property
     def fixed_complete(self):
@@ -230,6 +304,11 @@ class GateTemporalAccumulator:
             raise ValueError("learned scores and targets must match sample_ids")
 
         in_sample = losses.argmin(0)
+        if self.learned_index is not None:
+            violation = losses[in_sample, np.arange(len(sample_ids))] > (
+                losses[self.learned_index] + 1e-8)
+            self.learned_loss_violations += int(violation.sum())
+            assert not violation.any(), "in-sample oracle loss exceeded learned-q loss"
         previous = self._previous.setdefault(condition, {})
         temporal = np.empty(len(sample_ids), dtype=np.int64)
         for index, sample_id in enumerate(sample_ids):
@@ -283,6 +362,7 @@ class GateTemporalAccumulator:
                 condition: matched / count
                 for condition, (matched, count) in self._agreement.items()
             },
+            "in_sample_oracle_learned_loss_violations": self.learned_loss_violations,
         }
         for name, conditions in self.scores.items():
             output["ap"][name] = {}
@@ -299,4 +379,4 @@ class GateTemporalAccumulator:
 
 
 __all__ = ["GateTemporalAccumulator", "GateXfitAccumulator", "REDUCED_NAMES", "cross_episode_permutation",
-           "merge_summary", "reduced_suite", "write_csv"]
+           "merge_summary", "partial_summary", "reduced_suite", "write_csv"]

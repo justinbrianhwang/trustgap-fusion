@@ -25,10 +25,12 @@ from rrf.tf_evaluate import run_suite
 from rrf.tf_gated import GatedTransFuser, RAW_STAT_DIM
 from rrf.tf_probes import q_targets, q_targets_relative, render_tf_heatmap
 from rrf.transfuser_io import VARIANTS, load_raw_tf, load_tf_model, preprocess_tf, tf_targets
+from rrf.train import fusion_objective
 
 
-METHODS = ("B2", "BQ", "B3", "B4", "P", "PG", "PR", "PS", "PGS", "PT", "PGT")
+METHODS = ("B2", "BQ", "B3", "B3A", "B4", "P", "PG", "PR", "PS", "PGS", "PT", "PGT")
 GATED_METHODS = ("P", "BQ", "PG", "PR", "PS", "PGS", "PT", "PGT")
+PRETRAINED_ROUTER_METHODS = GATED_METHODS + ("B3A",)
 GATE_ONLY = ("PG", "PGS", "PGT")
 MECHANISM = {"PS": "token_scaling", "PGS": "token_scaling",
              "PT": "key_scaling", "PGT": "key_scaling"}
@@ -288,7 +290,7 @@ def build_method(cfg, variant, method, seed, stages, device, seed_file=None,
     model, config = load_tf_model(variant, seed_file, device)
     estimator = reference = None
     dimension = stat_dim(model)
-    if method in GATED_METHODS:
+    if method in PRETRAINED_ROUTER_METHODS:
         estimator = ReliabilityEstimator(dimension,
             cfg["reliability"]["estimator_hidden_dim"],
             cfg["reliability"]["estimator_hidden_layers"]).to(device)
@@ -595,15 +597,15 @@ def stage_fusion(cfg, args, device):
             output = gate(batch)
             task, parts = native_detection_loss(output, batch["target_boxes"],
                                                 gate.model.head, config)
-            loss = task
+            q_star = None
             if method in GATED_METHODS and training["lambda_quality"] > 0:
                 q_star, _ = quality_targets(reference, batch, cfg, target_kind)
-                foreground = batch["target_heatmap"].flatten(1).ge(0.99).any(1)
-                if foreground.any():
-                    quality = F.smooth_l1_loss(output["q"][foreground],
-                                               q_star[foreground].detach())
-                    loss = loss + training["lambda_quality"] * quality
-                    record["quality"] += float(quality.detach()) / accumulation
+            loss, quality = fusion_objective(
+                task, output["q"], q_star,
+                batch["target_heatmap"].flatten(1).ge(0.99).any(1),
+                training["lambda_quality"], method in GATED_METHODS)
+            if quality is not None:
+                record["quality"] += float(quality.detach()) / accumulation
             (loss / accumulation).backward()
             record["loss"] += float(loss.detach()) / accumulation
             record["task"] += float(task.detach()) / accumulation

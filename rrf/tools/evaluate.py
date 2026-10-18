@@ -41,12 +41,16 @@ def main():
     ap.add_argument("--subgroup", default=None)
     ap.add_argument("--max-samples", type=int, default=None)
     ap.add_argument("--batch-size", type=int, default=16)
+    ap.add_argument("--frame-stride", type=int, default=1)
     args = ap.parse_args()
+    if args.frame_stride < 1:
+        ap.error("--frame-stride must be >= 1")
     cfg = load_config(args.config)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     root = cfg["paths"]["dataset_root"]
     split = json.loads((Path(cfg["paths"]["artifacts_root"]) / "manifests" / "split.json").read_text())
     ids = data.split_samples(root, split, args.split, args.subgroup, max_frames=args.max_samples, seed=1)
+    ids = ids[::args.frame_stride]
     if args.suite == "smoke":
         suite = evaluate.SMOKE_SUITE
     elif args.suite == "clean":
@@ -67,7 +71,8 @@ def main():
     for c in res:
         res[c]["kind"] = evaluate.condition_kind(res[c]["spec"], cfg["corruption"])
     (out_dir / "metrics.json").write_text(json.dumps(res, indent=2))
-    summary = {"method": args.method, "seed": args.seed, "suite": args.suite, "split": args.split, "n_samples": len(ids),
+    summary = {"method": args.method, "seed": args.seed, "suite": args.suite, "split": args.split,
+               "frame_stride": args.frame_stride, "n_samples": len(ids),
                "episodes": sorted({s.split('/')[0] for s in ids}), "provenance": prov, "config_sha256": cfg["_meta"]["config_sha256"],
                "split_sha256": upstream.sha256_file(Path(cfg["paths"]["artifacts_root"]) / "manifests" / "split.json"),
                "ap": {c: r["grid_fg_ap"] for c, r in res.items()}}

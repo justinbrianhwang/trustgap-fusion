@@ -16,7 +16,20 @@ from rrf.tf_probes import render_tf_heatmap
 from rrf.transfuser_io import (VARIANTS, load_raw_tf, load_tf_model, predict_tf,
                                preprocess_tf, tf_targets)
 
-METHODS = ("B0", "B2", "BQ", "B3", "B4", "P", "PG", "PR", "PS", "PGS", "PT", "PGT")
+METHODS = ("B0", "B2", "BQ", "B3", "B3A", "B4", "P", "PG", "PR", "PS", "PGS", "PT", "PGT")
+
+
+def save_predictions(path, sample_ids, heatmaps, boxes):
+    """Save fixed-shape TransFuser predictions; variable box lists are zero-padded with counts."""
+    boxes = [np.asarray(value, dtype=np.float32).reshape(-1, 8) for value in boxes]
+    counts = np.asarray([len(value) for value in boxes], dtype=np.int32)
+    width = int(counts.max()) if len(counts) else 0
+    padded = np.zeros((len(boxes), width, 8), dtype=np.float32)
+    for index, value in enumerate(boxes):
+        padded[index, :len(value)] = value
+    np.savez_compressed(path, sample_ids=np.asarray(sample_ids),
+                        center_heatmap=np.asarray(heatmaps, dtype=np.float16),
+                        boxes=padded, box_counts=counts)
 
 
 def center_distance_ap(predictions, targets, pixels_per_meter, radius=1.0,
@@ -133,6 +146,8 @@ def run_suite(model, config, dataset_root, sample_ids, suite, seed, output_dir,
                                   for key in ("camera", "lidar")},
                 "elapsed_s": round(time.time() - started, 1),
             }
+            save_predictions(output_dir / f"pred_{condition}.npz", sample_ids,
+                             heatmaps, predicted_boxes)
             print(f"[{condition}] AP@1m={ap1} AP@2m={ap2} heatmap_peak_AP={results[condition]['heatmap_peak_ap']}", flush=True)
     (output_dir / "metrics.json").write_text(json.dumps(results, indent=2))
     return results
@@ -170,8 +185,9 @@ def main():
     ids = _sample_ids(args.root, args.split, args.artifacts_root)
     if not ids:
         raise RuntimeError(f"no samples found under {args.root}")
+    stage_tag = "" if args.stages == "0,1,2,3" else f"_st{args.stages.replace(',', '')}"
     output = Path(args.artifacts_root) / "tf_metrics" / (
-        f"{args.variant}_{args.method}_seed{args.seed}_{args.suite}_{args.split}")
+        f"{args.variant}_{args.method}{stage_tag}_seed{args.seed}_{args.suite}_{args.split}")
     results = run_suite(model, config, args.root, ids, suite, args.seed, output,
                         args.frame_stride, args.batch_size, device)
     summary = {"variant": args.variant, "method": args.method, "suite": args.suite,

@@ -1,4 +1,4 @@
-"""Training stages: reference check -> reliability estimator -> fusion (B1/B2/B3/B4/P).
+"""Training stages: reference check -> reliability estimator -> fusion methods.
 
 All fusion methods share the initial checkpoint, split, corruption schedule (seeded by
 experiment seed + sample id + step, never by method), freeze policy, optimizer budget and
@@ -142,6 +142,7 @@ def quality_targets(reference, batch, fg, cfg, target):
 
 
 GATED_METHODS = ("P", "BQ", "PG", "PR", "PS", "PGS", "PT", "PGT")  # trained reliability + quality loss; BQ keeps its gate disabled
+PRETRAINED_ROUTER_METHODS = GATED_METHODS + ("B3A",)
 GATE_ONLY = ("PG", "PGS", "PGT")
 MECHANISM = {"PS": "token_scaling", "PGS": "token_scaling", "PT": "key_scaling", "PGT": "key_scaling"}
 
@@ -162,6 +163,15 @@ def rel_ckpt_name(seed, target):
 def log_line(path, rec):
     with open(path, "a") as f:
         f.write(json.dumps(rec) + "\n")
+
+
+def fusion_objective(task, q, q_star, foreground, quality_weight, use_quality):
+    """Return task plus optional foreground quality loss and the unweighted quality term."""
+    if not use_quality or quality_weight <= 0 or not foreground.any():
+        return task, None
+    quality = torch.nn.functional.smooth_l1_loss(
+        q[foreground], q_star[foreground].detach())
+    return task + quality_weight * quality, quality
 
 
 # ------------------------------------------------------------------ stage: reference
@@ -299,7 +309,7 @@ def build_method(cfg, method, device, seed):
     fc = cfg["fusion"]
     stat_dim = 2 * model.embed_dim + 2 + RAW_STAT_DIM
     est, reference = None, None
-    if method in GATED_METHODS:  # PG = gate-only training on the frozen fusion; PR = relative quality target; PS/PGS = token scaling
+    if method in PRETRAINED_ROUTER_METHODS:  # B3A matches P except that its quality loss is disabled
         ck = torch.load(ckpt_dir(cfg) / rel_ckpt_name(seed, "relative" if method == "PR" else "absolute"), map_location=device, weights_only=False)
         est = ReliabilityEstimator(stat_dim, cfg["reliability"]["estimator_hidden_dim"], cfg["reliability"]["estimator_hidden_layers"]).to(device)
         est.load_state_dict(ck["estimator"])
@@ -363,14 +373,14 @@ def stage_fusion(cfg, args, device):
             batch = to_device(next(loader), device)
             out = gate(batch)
             task, parts = native_traffic_loss(out["traffic"], batch["target"])
-            loss = task
+            q_star = None
             if method in GATED_METHODS and tc["lambda_quality"] > 0:
                 q_star, _ = quality_targets(reference, batch, batch["fg"], cfg, target_kind)
-                fg_present = batch["fg"].any(1)
-                if fg_present.any():
-                    lq = torch.nn.functional.smooth_l1_loss(out["q"][fg_present], q_star[fg_present].detach())
-                    loss = loss + tc["lambda_quality"] * lq
-                    rec["quality"] += float(lq) / accum
+            loss, lq = fusion_objective(
+                task, out["q"], q_star, batch["fg"].any(1), tc["lambda_quality"],
+                method in GATED_METHODS)
+            if lq is not None:
+                rec["quality"] += float(lq) / accum
             (loss / accum).backward()
             rec["loss"] += float(loss) / accum
             rec["task"] += float(task) / accum
@@ -453,7 +463,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/pilot.yaml")
     ap.add_argument("--stage", required=True, choices=["reference", "reliability", "fusion"])
-    ap.add_argument("--method", default="P", choices=["B1", "B2", "B3", "B4", "P", "BQ", "PG", "PR", "PS", "PGS", "PT", "PGT"])
+    ap.add_argument("--method", default="P", choices=["B1", "B2", "B3", "B3A", "B4", "P", "BQ", "PG", "PR", "PS", "PGS", "PT", "PGT"])
     ap.add_argument("--target", default="absolute", choices=["absolute", "relative"], help="reliability stage: quality target definition")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=None, help="override the stage's step count (smoke runs)")

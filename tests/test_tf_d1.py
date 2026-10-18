@@ -15,7 +15,7 @@ from rrf import tf_diagnose
 from rrf.diag_common import GateTemporalAccumulator, cross_episode_permutation
 from rrf.tf_corruptions import corrupt_tf_sample
 from rrf.tf_diagnose import matched_center_count_1m, removal_outputs
-from rrf.tf_evaluate import center_distance_ap
+from rrf.tf_evaluate import center_distance_ap, save_predictions
 from rrf.tf_gated import GatedTransFuser
 from rrf.tf_probes import heatmap_reference_error, render_tf_heatmap
 
@@ -184,15 +184,50 @@ def test_center_distance_ap_known_answer():
     assert ap == 0.5 and info["n_gt"] == 1 and info["n_det"] == 2
 
 
+def test_tf_predictions_are_saved_padded_with_counts(tmp_path):
+    heatmaps = [np.ones((64, 64), np.float32), np.zeros((64, 64), np.float32)]
+    boxes = [np.ones((2, 8), np.float32), np.full((1, 8), 2, np.float32)]
+    path = tmp_path / "pred_clean.npz"
+    save_predictions(path, ["ep/0", "ep/1"], heatmaps, boxes)
+    with np.load(path) as saved:
+        assert saved["center_heatmap"].dtype == np.float16
+        assert saved["center_heatmap"].shape == (2, 64, 64)
+        assert saved["boxes"].shape == (2, 2, 8)
+        assert saved["box_counts"].tolist() == [2, 1]
+        assert np.all(saved["boxes"][1, 1] == 0)
+
+
 def test_diagnostic_utility_interventions_keep_the_same_weights():
     gate, batch = GatedTransFuser(_Model().eval()).eval(), _batch()
     before = {name: value.clone() for name, value in gate.state_dict().items()}
     means = {stage: {modality: torch.zeros(4) for modality in ("camera", "lidar")}
              for stage in range(4)}
     outputs = removal_outputs(gate, batch, means)
-    assert set(outputs) == {(kind, modality) for kind in ("hardmask", "meantoken")
-                            for modality in ("camera", "lidar")}
+    assert set(outputs) == {
+        (variant, level, modality)
+        for variant, level in (("sensor-level removal", "sensor"),
+                               ("stage-level removal (all stages)", "stage"),
+                               ("stage-level mean replacement (all stages)", "stage"))
+        for modality in ("camera", "lidar")}
     assert all(torch.equal(value, gate.state_dict()[name]) for name, value in before.items())
+
+
+def test_sensor_removal_replaces_inputs_before_the_encoders():
+    gate, batch = GatedTransFuser(_Model().eval()).eval(), _batch()
+    seen = {}
+    camera_handle = gate.model._model.image_encoder.features.conv1.register_forward_pre_hook(
+        lambda _module, inputs: seen.__setitem__("camera", inputs[0].detach().clone()))
+    lidar_handle = gate.model._model.lidar_encoder._model.conv1.register_forward_pre_hook(
+        lambda _module, inputs: seen.__setitem__("lidar", inputs[0].detach().clone()))
+    try:
+        gate(batch, sensor_remove="camera")
+        assert torch.count_nonzero(seen["camera"]) == 0
+        gate(batch, sensor_remove="lidar")
+        assert torch.count_nonzero(seen["lidar"]) == 0
+    finally:
+        camera_handle.remove()
+        lidar_handle.remove()
+    assert torch.count_nonzero(batch["rgb"]) > 0 and torch.count_nonzero(batch["lidar"]) > 0
 
 
 def test_diagnostic_shuffle_crosses_episodes():
@@ -246,12 +281,49 @@ def test_transfuser_temporal_analysis_runs_from_synthetic_outputs(monkeypatch):
 
     monkeypatch.setattr(tf_diagnose, "_loader", fake_loader)
     monkeypatch.setattr(tf_diagnose, "_truth", fake_truth)
-    names = [f"{a:g},{b:g}" for a, b in candidates]
+    names = [f"{a:g},{b:g}" for a, b in candidates] + ["learned_q"]
     accumulator = GateTemporalAccumulator(names, names.index("1,1"), "transfuser")
     summary = tf_diagnose.run_oracle_gate_temporal(
         FakeGate(), {"dataset_root": "unused", "corruption": {"base_seed": 0}}, ids,
         {"clean": {}}, dict(zip(ids, boxes)), "cpu", 2,
         SimpleNamespace(pixels_per_meter=1), accumulator)
     assert summary["best_fixed_candidate"] == names[0]
+    assert summary["in_sample_oracle_learned_loss_violations"] == 0
     assert set(summary["ap"]["temporal_oracle"]["clean"]) == {
         "heatmap_peak_ap", "vehicle_center_ap_1m"}
+
+
+def test_transfuser_partial_analysis_scales_and_clips_learned_q(monkeypatch):
+    ids = ["ep0/0000", "ep1/0000"]
+    learned_q = torch.tensor([[0.2, 0.8], [0.4, 0.6]])
+    boxes = [np.ones((1, 7), np.float32) for _ in ids]
+    captured = {}
+
+    class FakeGate:
+        eps = 0.1
+
+        def __call__(self, batch, q_override=None):
+            q = learned_q if q_override is None else q_override
+            return {"q": q, "center_heatmap": q.sum(1)[:, None, None, None],
+                    "boxes": torch.zeros(len(q), 1, 8)}
+
+    monkeypatch.setattr(tf_diagnose, "_loader",
+                        lambda *_args: iter([(ids, {"sample_id": ids})]))
+    monkeypatch.setattr(tf_diagnose, "_truth", lambda *_args: (
+        torch.ones(2, 1, 1), boxes))
+    monkeypatch.setattr(tf_diagnose, "q_targets", lambda *_args: (
+        torch.ones(2, 2), torch.tensor([[0.1, 0.2], [0.3, 0.4]])))
+    monkeypatch.setattr(tf_diagnose, "prediction_losses", lambda output, *_args: (
+        output["q"].sum(1), (output["q"][:, 0] * 10).long()))
+    monkeypatch.setattr(tf_diagnose, "write_csv",
+                        lambda _path, rows: captured.setdefault("rows", rows))
+    project = {"dataset_root": "unused", "corruption": {"base_seed": 0},
+               "reliability": {"tau_quality": 0.2}}
+    config = SimpleNamespace(pixels_per_meter=1)
+    summary = tf_diagnose.run_partial(
+        FakeGate(), object(), project, ids, {"clean": {}}, {}, Path("unused"),
+        "cpu", 2, 0, config)
+    assert len(captured["rows"]) == len(ids) * 2 * 4
+    assert min(row["intervened_q"] for row in captured["rows"]) == pytest.approx(0.1)
+    assert max(row["intervened_q"] for row in captured["rows"]) == pytest.approx(1.0)
+    assert "clean" in summary["foreground_by_kind"]

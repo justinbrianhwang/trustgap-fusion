@@ -18,7 +18,7 @@ def cell_centres():
     return (j - 9.5).ravel(), (17.5 - i).ravel()  # x, y for the 400 flattened cells
 
 
-def decode_centres(grid, score_threshold, nms_radius=2.0):
+def decode_centres(grid, score_threshold, nms_radius=2.0, region=None):
     """grid (400,7) -> list of (score, x, y). Peak extraction: cells above threshold, greedy
     suppression of lower-scored detections within nms_radius metres of an accepted one."""
     grid = np.asarray(grid).reshape(400, 7)
@@ -31,6 +31,8 @@ def decode_centres(grid, score_threshold, nms_radius=2.0):
         s = float(grid[k, 0])
         if s < score_threshold:
             break
+        if region is not None and not region(float(x[k]), float(y[k])):
+            continue
         if all((x[k] - kx) ** 2 + (y[k] - ky) ** 2 >= nms_radius ** 2 for _, kx, ky in kept):
             kept.append((s, float(x[k]), float(y[k])))
     return kept

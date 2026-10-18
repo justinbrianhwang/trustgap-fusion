@@ -1,0 +1,732 @@
+[
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "B2",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_F1_confirmatory_primary"
+ },
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "BQ",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_F1_confirmatory_primary"
+ },
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "B3A",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_F1_confirmatory_primary"
+ },
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "B4",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_F1_confirmatory_primary"
+ },
+ {
+  "model": "interfuser",
+  "method": "PG",
+  "baseline": "B0",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_F1_confirmatory_primary"
+ },
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "B2",
+  "metric": "common_vehicle_center_ap_1m",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_F2_secondary_common_ap"
+ },
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "BQ",
+  "metric": "common_vehicle_center_ap_1m",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_F2_secondary_common_ap"
+ },
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "B3A",
+  "metric": "common_vehicle_center_ap_1m",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_F2_secondary_common_ap"
+ },
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "B4",
+  "metric": "common_vehicle_center_ap_1m",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_F2_secondary_common_ap"
+ },
+ {
+  "model": "interfuser",
+  "method": "PG",
+  "baseline": "B0",
+  "metric": "common_vehicle_center_ap_1m",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_F2_secondary_common_ap"
+ },
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "B2",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_clean_descriptive"
+ },
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "BQ",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_clean_descriptive"
+ },
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "B3A",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_clean_descriptive"
+ },
+ {
+  "model": "interfuser",
+  "method": "P",
+  "baseline": "B4",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_clean_descriptive"
+ },
+ {
+  "model": "interfuser",
+  "method": "PG",
+  "baseline": "B0",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_clean_descriptive"
+ },
+ {
+  "model": "interfuser",
+  "method": "PS",
+  "baseline": "B2",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_exploratory"
+ },
+ {
+  "model": "interfuser",
+  "method": "PT",
+  "baseline": "B2",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_exploratory"
+ },
+ {
+  "model": "interfuser",
+  "method": "B3",
+  "baseline": "B3A",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_exploratory"
+ },
+ {
+  "model": "interfuser",
+  "method": "PGS",
+  "baseline": "B0",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_exploratory"
+ },
+ {
+  "model": "interfuser",
+  "method": "PGT",
+  "baseline": "B0",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_exploratory"
+ },
+ {
+  "model": "interfuser",
+  "method": "PR",
+  "baseline": "P",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_exploratory"
+ },
+ {
+  "model": "interfuser",
+  "method": "weak:P",
+  "baseline": "weak:B2",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_exploratory"
+ },
+ {
+  "model": "interfuser",
+  "method": "weak:PS",
+  "baseline": "weak:B2",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_exploratory"
+ },
+ {
+  "model": "interfuser",
+  "method": "weak:PT",
+  "baseline": "weak:B2",
+  "metric": "grid_fg_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "interfuser_exploratory"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "B2",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_F1_confirmatory_primary"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "BQ",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_F1_confirmatory_primary"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "B3A",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_F1_confirmatory_primary"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "B4",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_F1_confirmatory_primary"
+ },
+ {
+  "model": "transfuser",
+  "method": "PG",
+  "baseline": "B0",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_F1_confirmatory_primary"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "B2",
+  "metric": "common_vehicle_center_ap_1m",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_F2_secondary_common_ap"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "BQ",
+  "metric": "common_vehicle_center_ap_1m",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_F2_secondary_common_ap"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "B3A",
+  "metric": "common_vehicle_center_ap_1m",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_F2_secondary_common_ap"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "B4",
+  "metric": "common_vehicle_center_ap_1m",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_F2_secondary_common_ap"
+ },
+ {
+  "model": "transfuser",
+  "method": "PG",
+  "baseline": "B0",
+  "metric": "common_vehicle_center_ap_1m",
+  "kinds": [
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_F2_secondary_common_ap"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "B2",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_clean_descriptive"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "BQ",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_clean_descriptive"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "B3A",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_clean_descriptive"
+ },
+ {
+  "model": "transfuser",
+  "method": "P",
+  "baseline": "B4",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_clean_descriptive"
+ },
+ {
+  "model": "transfuser",
+  "method": "PG",
+  "baseline": "B0",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_clean_descriptive"
+ },
+ {
+  "model": "transfuser",
+  "method": "PS",
+  "baseline": "B2",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_exploratory"
+ },
+ {
+  "model": "transfuser",
+  "method": "PT",
+  "baseline": "B2",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_exploratory"
+ },
+ {
+  "model": "transfuser",
+  "method": "B3",
+  "baseline": "B3A",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_exploratory"
+ },
+ {
+  "model": "transfuser",
+  "method": "PGS",
+  "baseline": "B0",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_exploratory"
+ },
+ {
+  "model": "transfuser",
+  "method": "PGT",
+  "baseline": "B0",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_exploratory"
+ },
+ {
+  "model": "transfuser",
+  "method": "PR",
+  "baseline": "P",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_exploratory"
+ },
+ {
+  "model": "transfuser",
+  "method": "weak:P",
+  "baseline": "weak:B2",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_exploratory"
+ },
+ {
+  "model": "transfuser",
+  "method": "weak:PS",
+  "baseline": "weak:B2",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_exploratory"
+ },
+ {
+  "model": "transfuser",
+  "method": "weak:PT",
+  "baseline": "weak:B2",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_exploratory"
+ },
+ {
+  "model": "transfuser",
+  "method": "P_st0",
+  "baseline": "P",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_exploratory"
+ },
+ {
+  "model": "transfuser",
+  "method": "P_st3",
+  "baseline": "P",
+  "metric": "heatmap_peak_ap",
+  "kinds": [
+   "clean",
+   "seen",
+   "unseen_severity",
+   "unseen_family",
+   "mixed",
+   "full_loss"
+  ],
+  "delta": 0.02,
+  "family": "transfuser_exploratory"
+ }
+]

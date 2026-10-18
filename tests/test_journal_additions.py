@@ -9,6 +9,8 @@ from rrf import corruptions as C
 from rrf import data
 from rrf.config import ConfigError, load_config, validate
 from rrf.tools.select_checkpoint import load_test_ap, select_from_log
+from rrf.tools import journal_summary
+from rrf.tools.journal_summary import tf_peak_ap
 from rrf.train import sample_condition
 
 
@@ -114,3 +116,30 @@ def test_select_checkpoint_rules():
     assert load_test_ap(Path(__file__).parent / "fixtures" / "checkpoint_test_ap.json") == {10: 0.1, 20: 0.4}
     fallback = select_from_log(log, "val", -0.1)
     assert fallback["step"] == 40 and fallback["eligible"] is False
+
+
+def test_journal_tf_peak_metric_ignores_gaussian_tails():
+    predictions = np.array([[[0.9, 0.8, 0.1]]])
+    labels = np.array([[[1, -1, 0]]], dtype=np.int8)
+    assert tf_peak_ap(predictions, labels) == 1.0
+
+
+def test_journal_summary_applies_declared_holm_family(monkeypatch):
+    ids = ["ep0/0", "ep1/0"]
+
+    def fake_inputs(_model, method, _metric, kinds, *_args):
+        shift = 1.0 if method == "P" else 0.0
+        return {seed: {kinds[0]: {"sample_ids": ids,
+                                  "predictions": np.array([shift, shift]),
+                                  "labels": np.zeros(2)}} for seed in (0, 1)}
+
+    monkeypatch.setattr(journal_summary, "load_crossed_inputs", fake_inputs)
+    comparison = {"model": "interfuser", "method": "P", "baseline": "B2",
+                  "metric": "grid_fg_ap", "kinds": ["seen", "mixed"],
+                  "delta": 0.02, "family": "P_vs_B2"}
+    monkeypatch.setitem(journal_summary.METRICS, "grid_fg_ap",
+                        lambda predictions, _labels: np.mean(predictions))
+    rows = journal_summary.run_comparisons([comparison], {}, "a", "b", repeats=20, seed=1)
+    assert len(rows) == 2
+    assert all(row["result"]["holm_reject_zero"] for row in rows)
+    assert all(row["result"]["verdict_holm"] == "improves" for row in rows)

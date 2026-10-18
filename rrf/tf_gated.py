@@ -11,11 +11,14 @@ LiDAR keys compete in one normalization.
 
 The returned sequence is split back into image and LiDAR maps (lines 361-365)
 and each map is added residually to its own convolutional branch at all four
-stages (lines 153-194). Thus “removing” a modality means masking all of its
+stages (lines 153-194). Thus stage-level removal means masking all of its
 keys, zeroing its GPT input tokens so query residuals cannot leak the removed
 features, and zeroing that branch immediately before the fusion residual is
-added. The removed branch can consequently be rebuilt only from the remaining
-modality through attention; no upstream source file is modified.
+added. A stage-level intervention does not rewind the retained branch, so at a
+later fusion boundary that branch can still contain information fused at an
+earlier boundary. Sensor-level removal instead replaces the camera input by a
+black frame (which then undergoes normal image normalization) or the LiDAR
+input by an empty BEV before either encoder runs. No upstream source is changed.
 """
 import math
 
@@ -64,12 +67,12 @@ def modality_statistics(image_feature, lidar_feature, batch):
                       raw_statistics(batch)), 2)
 
 
-def _normalize_mask(mask):
+def _normalize_mask(mask, argument="modality_mask"):
     if mask is None:
         return set()
     values = {mask} if isinstance(mask, str) else set(mask)
     if not values <= set(MODALITIES):
-        raise ValueError("modality_mask must be 'camera', 'lidar', or an iterable of those")
+        raise ValueError(f"{argument} must be 'camera', 'lidar', or an iterable of those")
     if len(values) == 2:
         raise ValueError("cannot mask both camera and lidar modalities")
     return values
@@ -242,14 +245,20 @@ class GatedTransFuser(nn.Module):
         return features, image_grid, image_global + lidar_global, q_score, stats, attentions
 
     def forward(self, batch, q_override=None, gate_enabled=None, modality_mask=None,
-                modality_replace=None, mean_features=None, return_attention=False):
+                modality_replace=None, mean_features=None, return_attention=False,
+                sensor_remove=None):
         hard_mask = _normalize_mask(modality_mask)
+        sensor_remove = _normalize_mask(sensor_remove, "sensor_remove")
         if modality_replace not in (None, *MODALITIES):
             raise ValueError("modality_replace must be 'camera' or 'lidar'")
         device = next(self.model.parameters()).device
         if gate_enabled is None:
             gate_enabled = self.gate_enabled_by_default
         inputs = _batched(batch, device)
+        if "camera" in sensor_remove:
+            inputs["rgb"] = torch.zeros_like(inputs["rgb"])
+        if "lidar" in sensor_remove:
+            inputs["lidar"] = torch.zeros_like(inputs["lidar"])
         lidar = inputs["lidar"]
         if self.model.use_target_point_image:
             lidar = torch.cat((lidar, inputs["target_point_image"]), 1)

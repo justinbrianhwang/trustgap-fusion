@@ -17,10 +17,11 @@ from torch import nn
 from rrf.config import load_config
 from rrf.gated import ReliabilityEstimator
 from rrf.tf_corruptions import corruption_seed
-from rrf.tf_train import (TF_TRAINABLE_PREFIXES, encode_detection_targets,
+from rrf.tf_train import (GATED_METHODS, PRETRAINED_ROUTER_METHODS,
+                          TF_TRAINABLE_PREFIXES, encode_detection_targets,
                           native_detection_loss, scheduled_condition, set_trainable,
                           stage_fusion, train_mode)
-from rrf.train import sample_condition
+from rrf.train import fusion_objective, sample_condition
 
 
 class _Head:
@@ -101,6 +102,22 @@ def test_gate_only_optimizer_step_leaves_fusion_weights_unchanged():
     loss.backward()
     optimizer.step()
     assert all(torch.equal(value, before[name]) for name, value in model.state_dict().items())
+
+
+def test_b3a_and_p_steps_differ_only_by_quality_gradient():
+    assert "B3A" in PRETRAINED_ROUTER_METHODS and "B3A" not in GATED_METHODS
+    q_b3a = torch.tensor([[0.2, 0.8]], requires_grad=True)
+    q_p = q_b3a.detach().clone().requires_grad_()
+    q_star = torch.tensor([[0.9, 0.1]])
+    foreground = torch.tensor([True])
+    b3a, _ = fusion_objective(q_b3a.square().sum(), q_b3a, None,
+                              foreground, 0.7, False)
+    p, quality = fusion_objective(q_p.square().sum(), q_p, q_star,
+                                  foreground, 0.7, True)
+    quality_gradient = torch.autograd.grad(quality, q_p, retain_graph=True)[0]
+    b3a.backward()
+    p.backward()
+    assert torch.allclose(q_p.grad - q_b3a.grad, 0.7 * quality_gradient)
 
 
 def test_tf_schedule_draw_equals_interfuser_draw():

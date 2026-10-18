@@ -6,9 +6,10 @@ positive, Gaussian tails are ignored).  Matched vehicle centres at 1 m are
 recorded as the second, object-level per-sample quality measure.  Every AP
 summary reports both ``heatmap_peak_ap`` and ``vehicle_center_ap_1m``.
 
-For the ``transfuser`` backbone, utility removes a modality through
-``GatedTransFuser(modality_mask=...)`` or replaces each of its four pre-fusion
-stage features by clean training-set means computed over at most 512 samples.
+For the ``transfuser`` backbone, removal utility is measured at the sensor
+input and by stage-level removal at all four fusion stages. The latter can
+leave information already fused into the retained branch at an earlier stage.
+Mean-feature replacement remains a stage-level sensitivity analysis.
 Oracle gates use the InterFuser candidate grid, and trace uses the same fixed
 q grid while recording camera/LiDAR attention mass for every GPT stage/layer.
 
@@ -35,7 +36,8 @@ from scipy.stats import spearmanr
 from rrf import data, metrics, stats
 from rrf.config import load_config
 from rrf.diag_common import (GateTemporalAccumulator, GateXfitAccumulator,
-                             cross_episode_permutation, merge_summary, reduced_suite, write_csv)
+                             cross_episode_permutation, merge_summary, partial_summary,
+                             reduced_suite, write_csv)
 from rrf.evaluate import condition_kind, full_suite
 from rrf.gated import ReliabilityEstimator, StaticGate
 from rrf.tf_corruptions import corrupt_tf_sample
@@ -48,8 +50,9 @@ from rrf.transfuser_io import (VARIANTS, load_raw_tf, load_tf_model,
 
 
 GRID = (0.05, 0.2, 0.5, 1.0)
+PARTIAL_FACTORS = (0.5, 0.8, 1.25, 2.0)
 TRACE_GRID = (0.05, 0.1, 0.2, 0.5, 1.0)
-ANALYSES = ("utility", "oracle_rel", "oracle_gate", "oracle_gate_xfit",
+ANALYSES = ("utility", "partial", "oracle_rel", "oracle_gate", "oracle_gate_xfit",
             "oracle_gate_temporal", "shuffle", "trace")
 MECHANISMS = {"PS": "token_scaling", "PGS": "token_scaling",
               "PT": "key_scaling", "PGT": "key_scaling"}
@@ -165,13 +168,16 @@ def prediction_losses(output, target_heatmaps, target_boxes, pixels_per_meter):
 
 
 def removal_outputs(gate, batch, mean_features):
-    """Run both removal interventions on one gate, without copying or changing its weights."""
-    return {(variant, modality): gate(
-                batch, modality_mask=modality if variant == "hardmask" else None,
-                modality_replace=modality if variant == "meantoken" else None,
-                mean_features=mean_features)
-            for variant in ("hardmask", "meantoken")
-            for modality in ("camera", "lidar")}
+    """Run sensor and stage interventions without copying or changing weights."""
+    outputs = {}
+    for modality in ("camera", "lidar"):
+        outputs[("sensor-level removal", "sensor", modality)] = gate(
+            batch, sensor_remove=modality)
+        outputs[("stage-level removal (all stages)", "stage", modality)] = gate(
+            batch, modality_mask=modality)
+        outputs[("stage-level mean replacement (all stages)", "stage", modality)] = gate(
+            batch, modality_replace=modality, mean_features=mean_features)
+    return outputs
 
 
 @torch.no_grad()
@@ -322,13 +328,14 @@ def run_utility(gate, reference, project, split, ids, suite, targets, output_dir
                                        project["reliability"]["tau_quality"])
             variants = removal_outputs(gate, batch, means)
             bases = _base_rows(batch_ids, condition, spec, project["corruption"], boxes)
-            for (variant, modality), output in variants.items():
+            for (variant, removal_level, modality), output in variants.items():
                 error, matches = prediction_losses(output, heatmaps, boxes, config.pixels_per_meter)
                 _append_predictions(predictions, f"{variant}_{modality}", condition, output)
                 modality_index = 0 if modality == "camera" else 1
                 for index, base in enumerate(bases):
                     utility = float(error[index] - full_error[index])
-                    rows.append(dict(base, variant=variant, modality=modality,
+                    rows.append(dict(base, variant=variant, removal_level=removal_level,
+                                     modality=modality,
                                      q=float(full["q"][index, modality_index]),
                                      q_star=float(q_star[index, modality_index]),
                                      E=float(errors[index, modality_index]),
@@ -343,8 +350,50 @@ def run_utility(gate, reference, project, split, ids, suite, targets, output_dir
                                      utility=utility, neg_utility=-utility,
                                      matched_center_utility=int(full_matches[index] - matches[index])))
     write_csv(output_dir / "utility.csv", rows)
-    return {"correlations": _utility_summary(rows, seed),
+    return {"label": "removal utility", "role": "sensitivity",
+            "correlations": _utility_summary(rows, seed),
             "ap": _metric_summary(predictions, truth)}
+
+
+@torch.no_grad()
+def run_partial(gate, reference, project, ids, suite, targets, output_dir,
+                device, batch_size, seed, config):
+    """Measure local loss changes when one learned quality is scaled at a time."""
+    rows = []
+    for condition, spec in suite.items():
+        for batch_ids, batch in _loader(project["dataset_root"], ids, spec,
+                                        project["corruption"]["base_seed"], config, batch_size):
+            heatmaps, boxes = _truth(batch_ids, targets, config, device)
+            full = gate(batch)
+            full_error, full_matches = prediction_losses(
+                full, heatmaps, boxes, config.pixels_per_meter)
+            _, errors = q_targets(reference, batch, heatmaps,
+                                  project["reliability"]["tau_quality"])
+            bases = _base_rows(batch_ids, condition, spec, project["corruption"], boxes)
+            for modality_index, modality in enumerate(("camera", "lidar")):
+                for factor in PARTIAL_FACTORS:
+                    q_score = full["q"].clone()
+                    q_score[:, modality_index] = (
+                        q_score[:, modality_index] * factor).clamp(gate.eps, 1.0)
+                    output = gate(batch, q_override=q_score)
+                    error, matches = prediction_losses(
+                        output, heatmaps, boxes, config.pixels_per_meter)
+                    for index, base in enumerate(bases):
+                        rows.append(dict(
+                            base, modality=modality, factor=factor,
+                            q=float(full["q"][index, modality_index]),
+                            intervened_q=float(q_score[index, modality_index]),
+                            E=float(errors[index, modality_index]),
+                            full_heatmap_reference_error=float(full_error[index]),
+                            heatmap_reference_error=float(error[index]),
+                            delta_heatmap_reference_error=float(error[index] - full_error[index]),
+                            full_negative_matched_center_count_1m=-int(full_matches[index]),
+                            negative_matched_center_count_1m=-int(matches[index]),
+                            delta_negative_matched_center_count_1m=int(
+                                full_matches[index] - matches[index])))
+    write_csv(output_dir / "partial.csv", rows)
+    return {"foreground_by_kind": partial_summary(
+        rows, ("heatmap_reference_error", "negative_matched_center_count_1m"), seed)}
 
 
 @torch.no_grad()
@@ -386,6 +435,7 @@ def run_oracle_gate(gate, project, ids, suite, targets, output_dir, device,
     candidates = [(camera, lidar) for camera in GRID for lidar in GRID]
     rows, predictions, truth = [], _new_predictions(), {}
     loss_sum, loss_count, chosen = Counter(), Counter(), Counter()
+    learned_loss_violations = 0
     add_temporal = temporal is not None and not temporal.has_data
     for condition, spec in suite.items():
         for batch_ids, batch in _loader(project["dataset_root"], ids, spec,
@@ -410,12 +460,25 @@ def run_oracle_gate(gate, project, ids, suite, targets, output_dir, device,
                     rows.append(dict(base, variant=key, q_camera=camera, q_lidar=lidar,
                                      heatmap_reference_error=float(error[index]),
                                      matched_center_count_1m=int(matches[index]), selected=False))
+            learned_output = gate(batch)
+            learned_error, learned_matches = prediction_losses(
+                learned_output, heatmaps, boxes, config.pixels_per_meter)
+            outputs.append(learned_output)
+            losses.append(learned_error)
+            for index, base in enumerate(bases):
+                rows.append(dict(base, variant="learned_q",
+                                 q_camera=float(learned_output["q"][index, 0]),
+                                 q_lidar=float(learned_output["q"][index, 1]),
+                                 heatmap_reference_error=float(learned_error[index]),
+                                 matched_center_count_1m=int(learned_matches[index]),
+                                 selected=False))
             best = torch.stack(losses, 1).argmin(1).cpu().numpy()
-            if xfit is not None or temporal is not None:
-                candidate_heatmaps = np.stack([
-                    output["center_heatmap"][:, 0].cpu().numpy() for output in outputs])
-                learned_output = gate(batch)
-                learned = learned_output["center_heatmap"][:, 0].cpu().numpy()
+            candidate_heatmaps = np.stack([
+                output["center_heatmap"][:, 0].cpu().numpy() for output in outputs])
+            learned = candidate_heatmaps[-1]
+            violations = torch.stack(losses, 1).min(1).values > learned_error + 1e-8
+            learned_loss_violations += int(violations.sum())
+            assert not violations.any(), "in-sample oracle loss exceeded learned-q loss"
             if xfit is not None:
                 xfit.add(condition, candidate_heatmaps, learned, heatmaps.cpu().numpy())
             if add_temporal:
@@ -426,7 +489,8 @@ def run_oracle_gate(gate, project, ids, suite, targets, output_dir, device,
                     learned_output["boxes"].cpu().numpy(), boxes)
             for index, candidate_index in enumerate(best):
                 rows[row_start + int(candidate_index) * len(batch_ids) + index]["selected"] = True
-                key = f"{candidates[candidate_index][0]:g},{candidates[candidate_index][1]:g}"
+                key = ("learned_q" if candidate_index == len(candidates)
+                       else f"{candidates[candidate_index][0]:g},{candidates[candidate_index][1]:g}")
                 chosen[(_condition_fields(condition, spec, project["corruption"])["kind"], key)] += 1
                 selected = {name: value[index:index + 1] if torch.is_tensor(value) else value
                             for name, value in outputs[candidate_index].items()
@@ -449,6 +513,7 @@ def run_oracle_gate(gate, project, ids, suite, targets, output_dir, device,
             "best_fixed_candidate": best_fixed,
             "best_fixed_mean_heatmap_reference_error": loss_sum[best_fixed] / loss_count[best_fixed],
             "best_fixed_ap": metric_summary["best_fixed"],
+            "in_sample_oracle_learned_loss_violations": learned_loss_violations,
             "chosen_histogram_by_kind": {
                 kind: {key: count for (entry_kind, key), count in chosen.items() if entry_kind == kind}
                 for kind in sorted({kind for kind, _ in chosen})}}
@@ -472,10 +537,14 @@ def run_oracle_gate_xfit(gate, project, ids, suite, targets, device,
                     outputs.append(output)
                     if temporal is not None:
                         losses.append(heatmap_reference_error(output["center_heatmap"][:, 0], heatmaps))
-                candidate_heatmaps = np.stack([
-                    output["center_heatmap"][:, 0].cpu().numpy() for output in outputs])
                 learned_output = gate(batch)
                 learned = learned_output["center_heatmap"][:, 0].cpu().numpy()
+                outputs.append(learned_output)
+                if temporal is not None:
+                    losses.append(heatmap_reference_error(
+                        learned_output["center_heatmap"][:, 0], heatmaps))
+                candidate_heatmaps = np.stack([
+                    output["center_heatmap"][:, 0].cpu().numpy() for output in outputs])
                 xfit.add(condition, candidate_heatmaps, learned, heatmaps.cpu().numpy())
                 if add_temporal:
                     temporal.add(
@@ -526,6 +595,9 @@ def run_oracle_gate_temporal(gate, project, ids, suite, targets, device,
                     outputs.append(output)
                     losses.append(heatmap_reference_error(output["center_heatmap"][:, 0], heatmaps))
                 learned_output = gate(batch)
+                outputs.append(learned_output)
+                losses.append(heatmap_reference_error(
+                    learned_output["center_heatmap"][:, 0], heatmaps))
                 temporal.add(
                     condition, batch_ids,
                     np.stack([output["center_heatmap"][:, 0].cpu().numpy() for output in outputs]),
@@ -712,7 +784,7 @@ def main():
     if gate is not None:
         gate.eval()
     reference = None
-    if gate is not None and set(analyses) & {"utility", "oracle_rel"}:
+    if gate is not None and set(analyses) & {"utility", "partial", "oracle_rel"}:
         if args.method == "B0":
             reference = gate
         else:
@@ -722,7 +794,8 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     targets = {sample_id: tf_targets(root, sample_id, config) for sample_id in ids}
     project = {"dataset_root": root, "corruption": cfg["corruption"], "reliability": cfg["reliability"]}
-    candidates = [f"{camera:g},{lidar:g}" for camera in GRID for lidar in GRID]
+    candidates = ([f"{camera:g},{lidar:g}" for camera in GRID for lidar in GRID]
+                  + ["learned_q"])
     xfit = (GateXfitAccumulator(64 * 64, candidates, candidates.index("1,1"),
                                 args.seed, "transfuser")
             if "oracle_gate_xfit" in analyses else None)
@@ -731,6 +804,8 @@ def main():
 
     runners = {
         "utility": lambda: run_utility(gate, reference, project, split, ids, suite, targets,
+                                        output_dir, device, args.batch_size, args.seed, config),
+        "partial": lambda: run_partial(gate, reference, project, ids, suite, targets,
                                         output_dir, device, args.batch_size, args.seed, config),
         "oracle_rel": lambda: run_oracle_rel(gate, reference, project, ids, suite, targets,
                                               output_dir, device, args.batch_size, config, args.method),
