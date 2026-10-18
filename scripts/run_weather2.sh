@@ -6,7 +6,7 @@
 set -u
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PY="${RRF_PYTHON:-python}"
 LOG=artifacts_ext/pipeline.log
 run() { echo "=== $(date '+%F %T') START: $*" >> $LOG; "$PY" "$@" >> $LOG 2>&1; echo "=== $(date '+%F %T') EXIT $?: $*" >> $LOG; }
 W2="--weather-root dataset_weather2 --clear-root dataset_weather2 --out-tag _w2 --frame-stride 4"

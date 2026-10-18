@@ -7,7 +7,7 @@
 set -u
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PY="${RRF_PYTHON:-python}"
 LOG=artifacts_large/collect.log
 CFG=configs/extended.yaml
 TOWNS="Town01 Town02 Town03 Town04 Town05 Town10HD_Opt"

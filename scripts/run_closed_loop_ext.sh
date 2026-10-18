@@ -5,7 +5,7 @@
 set -u
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PY="${RRF_PYTHON:-python}"
 ROUTES="Town01_ep02_seed3702 Town02_ep00_seed3800 Town02_ep01_seed3801 Town03_ep00_seed3900 Town05_ep02_seed4102 Town10HD_Opt_ep02_seed9402"
 mkdir -p artifacts_ext/eval_logs
 # one CARLA client at a time (the follow-up orchestrator may call this script while another call is running)

@@ -3,7 +3,7 @@
 set -u
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PY="${RRF_PYTHON:-python}"
 LOG=artifacts/pilot_ablations.log
 run() { echo "=== $(date '+%F %T') START: $*" >> $LOG; "$PY" "$@" >> $LOG 2>&1; echo "=== $(date '+%F %T') EXIT $?: $*" >> $LOG; }
 for m in B1 B3 B4; do [ -f artifacts/checkpoints/fusion_${m}_seed0.pt ] && run -m rrf.tools.evaluate --method $m --suite full --split test; done

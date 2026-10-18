@@ -4,7 +4,7 @@
 set -u
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PY="${RRF_PYTHON:-python}"
 CFG=configs/large.yaml
 LOG=artifacts_large/pipeline.log
 mkdir -p artifacts_large/eval_logs

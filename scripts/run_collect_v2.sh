@@ -6,7 +6,7 @@
 set -u
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PY="${RRF_PYTHON:-python}"
 CFG=configs/extended.yaml
 ROOT=dataset_v2
 LOG=dataset_v2_collect.log

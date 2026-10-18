@@ -2,7 +2,7 @@
 # Cross-fitted gate-oracle control on the extension seed-0 checkpoints (legacy test), one process at a time.
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PY="${RRF_PYTHON:-python}"
 LOG=artifacts_ext/diagnostics/run_xfit.log
 for m in P PS PR PT B4 PG PGS B3; do
   for a in 1 2 3; do

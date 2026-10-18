@@ -18,6 +18,15 @@ docs/                    DECISIONS, UPSTREAM_AUDIT, DATA_PROTOCOL, EVALUATION_PR
 artifacts/               environment.json, tensor_contract.json, manifests/, checkpoints/, runs/, metrics/
 ```
 
+## Environments
+Two Python environments are used (InterFuser needs its vendored timm, TransFuser needs PyPI timm).
+The shell scripts read the interpreters from environment variables:
+
+```bash
+export RRF_PYTHON=/path/to/envs/rrf/python        # InterFuser side (default: python)
+export RRF_TF_PYTHON=/path/to/envs/rrf_tf/python  # TransFuser side (default: python)
+```
+
 ## Pipeline (env `rrf`, from the project root)
 ```powershell
 python -m rrf.tools.doctor                       # artifacts/environment.json

@@ -2,7 +2,7 @@
 # End-of-queue check for TransFuser fusion (same policy as run_journal_fixup.sh).
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PYTF="C:/Users/sunju/miniconda3/envs/rrf_tf/python.exe"
+PYTF="${RRF_TF_PYTHON:-python}"
 LOG=artifacts_journal/pipeline.log
 name() { "$PYTF" -c "from rrf.tf_train import fusion_name; print(fusion_name('$1', $2, tuple(int(x) for x in '$3'.split(','))))" 2>/dev/null | tail -1; }
 plan() {

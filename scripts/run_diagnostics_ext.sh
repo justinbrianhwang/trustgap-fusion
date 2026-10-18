@@ -4,7 +4,7 @@
 set -u
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PY="${RRF_PYTHON:-python}"
 LOG=artifacts_ext/diagnostics/run.log
 mkdir -p artifacts_ext/diagnostics
 d() { echo "=== $(date '+%F %T') START $*" >> $LOG; "$PY" -m rrf.tools.diagnose --config configs/extended.yaml --split test --suite reduced --frame-stride 2 "$@" >> $LOG 2>&1; rc=$?; echo "=== $(date '+%F %T') EXIT $rc $*" >> $LOG; }

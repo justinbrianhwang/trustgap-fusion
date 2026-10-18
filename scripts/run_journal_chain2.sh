@@ -4,8 +4,8 @@
 # InterFuser diagnostics queue is done.
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PYTF="C:/Users/sunju/miniconda3/envs/rrf_tf/python.exe"
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PYTF="${RRF_TF_PYTHON:-python}"
+PY="${RRF_PYTHON:-python}"
 CK=artifacts_journal/tf_checkpoints/transfuser
 until grep -q "RELIABILITY DONE" artifacts_journal/pipeline.log; do sleep 120; done
 for s in 0 1 2 3 4; do for t in absolute relative; do

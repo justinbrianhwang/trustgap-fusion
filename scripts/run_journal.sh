@@ -5,8 +5,8 @@
 set -u
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
-PYTF="C:/Users/sunju/miniconda3/envs/rrf_tf/python.exe"
+PY="${RRF_PYTHON:-python}"
+PYTF="${RRF_TF_PYTHON:-python}"
 CFG=configs/journal.yaml
 LOG=artifacts_journal/pipeline.log
 mkdir -p artifacts_journal/train_logs
@@ -23,7 +23,7 @@ case "${1:-}" in
     for s in 0 1 2; do tf_bg rel_rel_s$s --stage reliability --seed $s --target relative; done; wait
     mark "RELIABILITY DONE" ;;
   if_fusion)
-    # InterFuser fusion runs, 3 at a time, pre-registered order (docs/PREREGISTRATION_JOURNAL.md ¡×3)
+    # InterFuser fusion runs, 3 at a time, pre-registered order (docs/PREREGISTRATION_JOURNAL.md section 3)
     mark "IF FUSION START"
     q=()
     for s in 0 1 2 3 4; do for m in B2 P PS PT; do q+=("$m $s --keep-all-checkpoints"); done; for m in BQ B3; do q+=("$m $s"); done; done

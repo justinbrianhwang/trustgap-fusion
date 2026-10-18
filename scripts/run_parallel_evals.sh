@@ -3,7 +3,7 @@
 set -u
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PY="${RRF_PYTHON:-python}"
 mkdir -p artifacts/eval_logs
 pids=()
 for spec in "B1 0" "B3 0" "B4 0" "B2 1" "P 1" "B2 2" "P 2"; do

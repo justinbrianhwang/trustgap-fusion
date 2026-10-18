@@ -5,7 +5,7 @@
 set -u
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PY="${RRF_PYTHON:-python}"
 LOG=artifacts_large/collect.log
 CFG=configs/extended.yaml
 count() { "$PY" - "$1" <<'PYEOF'

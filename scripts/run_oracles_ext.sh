@@ -3,7 +3,7 @@
 # test): in-sample, cross-fitted and temporal. Starts after the InterFuser fusion queue to keep GPU load low.
 cd "$(dirname "$0")/.."
 export PYTHONUTF8=1
-PY="C:/Users/sunju/miniconda3/envs/rrf/python.exe"
+PY="${RRF_PYTHON:-python}"
 LOG=artifacts_ext/diagnostics/run_oracles.log
 until grep -q "IF FUSION VERIFIED" artifacts_journal/pipeline.log; do sleep 300; done
 for m in P PS PR PT B4 PG PGS PGT B3; do
