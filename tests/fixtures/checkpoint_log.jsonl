@@ -1,0 +1,5 @@
+{"eval": {"step": 0, "summary": {"clean_ap": 0.8, "corruption_macro_ap": 0.4}}}
+{"eval": {"step": 10, "summary": {"clean_ap": 0.78, "corruption_macro_ap": 0.6}}}
+{"eval": {"step": 20, "summary": {"clean_ap": 0.8, "corruption_macro_ap": 0.5}}}
+{"eval": {"step": 30, "summary": {"clean_ap": 0.79, "corruption_macro_ap": 0.7}}}
+{"eval": {"step": 40, "summary": {"clean_ap": 0.85, "corruption_macro_ap": 0.4}}}

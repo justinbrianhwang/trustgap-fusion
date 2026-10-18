@@ -1,0 +1,19 @@
+{
+  "train": {
+    "probe_fit_groups": [
+      "Town03_ep00_seed4700/0000"
+    ],
+    "reliability_fit_groups": []
+  },
+  "validation": {
+    "model_select_groups": [
+      "Town03_ep00_seed4700/0000"
+    ],
+    "calibration_groups": []
+  },
+  "test": {
+    "locked_groups": [
+      "Town03_ep00_seed4700"
+    ]
+  }
+}

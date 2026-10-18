@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rrf-interfuser"
+version = "0.1.0"
+description = "RRF-InterFuser: reliability-aware robust fusion research scaffold on CARLA 0.9.16"
+requires-python = ">=3.12"
+dependencies = ["numpy", "pyyaml", "torch", "torchvision", "opencv-python", "pillow", "scikit-image", "scipy", "psutil"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rrf*"]

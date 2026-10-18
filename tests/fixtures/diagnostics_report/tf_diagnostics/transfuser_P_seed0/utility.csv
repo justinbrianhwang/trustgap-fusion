@@ -1,0 +1,5 @@
+sample_id,episode_id,fg_present,condition,kind,variant,modality,q,neg_E,utility
+ep0/0,ep0,True,corrupt,seen,hardmask,camera,1.0,-0.4,0.1
+ep1/1,ep1,True,corrupt,seen,hardmask,camera,0.7,-0.3,0.2
+ep0/2,ep0,True,corrupt,seen,hardmask,camera,0.4,-0.2,0.3
+ep1/3,ep1,True,corrupt,seen,hardmask,camera,0.1,-0.1,0.4

@@ -1,0 +1,108 @@
+# RRF-InterFuser EXTENDED configuration (more training episodes, same locked test/validation). Every key is validated by rrf/config.py;
+# unknown keys are an error. Paths are relative to the project root.
+project:
+  name: rrf_interfuser
+  scope: traffic_grid_foreground_robustness
+  schema_version: 1
+
+paths:
+  upstream_repo: third_party/InterFuser
+  carla_root: carla
+  dataset_root: dataset
+  upstream_checkpoint: weights/interfuser.pth
+  artifacts_root: artifacts_ext
+
+upstream:
+  repository: https://github.com/opendilab/InterFuser
+  commit: f0be8ea294c49a59febaa032dd6da40b475e3657
+  model_name: interfuser_baseline
+  expected_carla_release: 0.9.16   # deviation from the md (0.9.10.1): RTX 5090 cannot run the legacy stack
+  strict_original_checkpoint: true
+
+execution:
+  device: auto
+  seed: 0
+  overwrite_existing_outputs: false
+
+simulation:
+  host: 127.0.0.1
+  port: 2000
+  traffic_manager_port: 8000
+  synchronous_mode: true
+  fixed_delta_seconds: 0.05
+  capture_every_n_ticks: 2        # 20 Hz sim -> 10 Hz capture
+  no_rendering_mode: false
+  warmup_ticks: 40
+  frames_per_episode: 300         # captured frames (10 Hz) -> 30 s of driving
+  num_vehicles: 40
+  num_walkers: 20
+  ego_blueprint: vehicle.lincoln.mkz_2017
+  ego_target_speed_kmh: 25.0
+  weather: ClearNoon
+  towns: [Town01, Town02, Town03, Town04, Town05, Town10HD_Opt]
+  episodes_per_town: 2
+
+split:
+  unit: episode
+  train_fraction: 0.60
+  validation_fraction: 0.20
+  test_fraction: 0.20
+  probe_fraction_within_train: 0.40
+  calibration_fraction_within_validation: 0.50
+  split_seed: 100
+  pretraining_overlap: unknown
+
+corruption:
+  base_seed: 1000
+  primary_camera_scope: whole_rig
+  train_families:
+    camera: [gaussian_noise, gaussian_blur, darkening]
+    lidar: [point_dropout, xyz_jitter]
+  train_severities: [1, 2, 3]
+  test_severities: [1, 2, 3, 4, 5]
+  heldout_families:
+    camera: [rectangular_occlusion]
+    lidar: [azimuth_sector_dropout]
+  train_condition_probabilities:
+    clean: 0.25
+    camera_only_corrupted: 0.30
+    lidar_only_corrupted: 0.30
+    both_corrupted: 0.15
+  silent_full_loss_fraction_of_single_corruption: 0.10
+
+reliability:
+  tau_quality: 0.2
+  tau_relative: 0.1          # for the relative target exp(-max(E_corrupt - E_clean, 0)/tau_relative)
+  add_raw_statistics: true   # feature-only estimator did not generalize (see DECISIONS); raw cues from model input tensors
+  estimator_hidden_dim: 128
+  estimator_hidden_layers: 2
+  steps: 2000
+  learning_rate: 0.0003
+  batch_size: 16
+
+fusion:
+  method: attention_log_prior
+  alpha: 1.0
+  epsilon: 0.0001
+  apply_encoder_self_attention: true
+  apply_decoder_cross_attention: true
+  freeze_tokenizer: true
+
+training:
+  optimizer: adamw
+  learning_rate: 0.00002
+  weight_decay: 0.01
+  batch_size: 8
+  gradient_accumulation_steps: 1
+  gradient_clip_norm: 1.0
+  fusion_steps: 3000
+  evaluation_interval_steps: 250
+  lambda_quality: 1.0
+  workers: 4
+
+metrics:
+  foreground_target_threshold: 0.01
+  clean_calibration_precision_target: 0.90
+  near_distance_m: 10.0
+  max_clean_ap_drop: 0.01
+  bootstrap_repeats: 2000

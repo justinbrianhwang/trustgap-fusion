@@ -1,0 +1,17 @@
+# Allow-list: only source, configs, scripts, tests, docs and the paper folder are versioned.
+/*
+!/.gitignore
+!/README.md
+!/pyproject.toml
+!/rrf/
+!/configs/
+!/scripts/
+!/tests/
+!/docs/
+!/Paper/
+# never version caches or temporary test folders
+__pycache__/
+*.pyc
+.pytest_cache/
+pytest-cache-files-*/
+.pytest_*/

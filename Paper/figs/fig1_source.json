@@ -1,0 +1,11 @@
+{
+  "sample_id": "Town02_ep00_seed3710/0045",
+  "foreground_cells": 38,
+  "episode": "Town02_ep00_seed3710",
+  "views": {
+    "front": "resize 341x256 -> center crop 224 (model input)",
+    "left/right": "resize 195x146 -> center crop 128",
+    "center": "center crop 128 of the raw 800x600 front image (no scaling)",
+    "lidar": "upstream BEV histogram (224x224, sum of the two height bins, 95th-percentile normalised) re-oriented for the figure: forward up, ego at bottom centre, left on the left; rendered metric (57 m lateral x 28 m forward, 16 px/m). The model's native array is 224x224 with 0.254 m/row lateral and 0.125 m/col forward."
+  }
+}
