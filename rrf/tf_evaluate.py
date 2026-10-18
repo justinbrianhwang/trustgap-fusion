@@ -79,9 +79,32 @@ def _stack(items):
     return {key: torch.stack([item[key] for item in items]) for key in items[0]}
 
 
+class _TFConditionSamples(torch.utils.data.Dataset):
+    """(sample, fixed corruption spec) -> model inputs + ground truth, prepared in DataLoader workers.
+    Same per-sample computation as the original single-process loop (deterministic corruption seeds)."""
+
+    def __init__(self, dataset_root, sample_ids, spec, seed, config):
+        self.root, self.ids, self.spec, self.seed, self.config = dataset_root, list(sample_ids), spec, seed, config
+
+    def __len__(self):
+        return len(self.ids)
+
+    def __getitem__(self, index):
+        sample_id = self.ids[index]
+        corrupt, audit = corrupt_tf_sample(load_raw_tf(self.root, sample_id), self.spec, self.seed)
+        truth = tf_targets(self.root, sample_id, self.config)
+        target = render_tf_heatmap(truth, self.config).cpu().numpy()
+        return preprocess_tf(corrupt, self.config), sample_id, audit, truth, target
+
+
+def _collate_tf(items):
+    return (_stack([item[0] for item in items]), [item[1] for item in items], [item[2] for item in items],
+            [item[3] for item in items], [item[4] for item in items])
+
+
 @torch.no_grad()
 def run_suite(model, config, dataset_root, sample_ids, suite, seed, output_dir,
-              frame_stride=1, batch_size=4, device="cuda"):
+              frame_stride=1, batch_size=4, device="cuda", workers=0):
     sample_ids = sample_ids[::frame_stride]
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -92,15 +115,11 @@ def run_suite(model, config, dataset_root, sample_ids, suite, seed, output_dir,
             started = time.time()
             predicted_boxes, target_boxes, heatmaps, target_heatmaps = [], [], [], []
             audits, latencies = [], []
-            for offset in range(0, len(sample_ids), batch_size):
-                ids = sample_ids[offset:offset + batch_size]
-                prepared, batch_audits = [], []
-                for sample_id in ids:
-                    corrupt, audit = corrupt_tf_sample(load_raw_tf(dataset_root, sample_id), spec, seed)
-                    prepared.append(preprocess_tf(corrupt, config))
-                    batch_audits.append(audit)
-                    audits.append(audit)
-                batch = _stack(prepared)
+            loader = torch.utils.data.DataLoader(
+                _TFConditionSamples(dataset_root, sample_ids, spec, seed, config), batch_size=batch_size,
+                shuffle=False, num_workers=workers, collate_fn=_collate_tf, persistent_workers=False)
+            for batch, ids, batch_audits, truths, targets in loader:
+                audits.extend(batch_audits)
                 if device == "cuda":
                     torch.cuda.synchronize()
                 tick = time.time()
@@ -110,9 +129,7 @@ def run_suite(model, config, dataset_root, sample_ids, suite, seed, output_dir,
                 latencies.extend([(time.time() - tick) / len(ids)] * len(ids))
                 boxes = output["boxes"].cpu().numpy()
                 maps = output["center_heatmap"][:, 0].cpu().numpy()
-                for index, (sample_id, audit) in enumerate(zip(ids, batch_audits)):
-                    truth = tf_targets(dataset_root, sample_id, config)
-                    target = render_tf_heatmap(truth, config).cpu().numpy()
+                for index, (sample_id, audit, truth, target) in enumerate(zip(ids, batch_audits, truths, targets)):
                     predicted_boxes.append(boxes[index])
                     target_boxes.append(truth)
                     heatmaps.append(maps[index])
@@ -168,6 +185,7 @@ def main():
                         help="gated fusion stages; must match a non-default training checkpoint")
     parser.add_argument("--frame-stride", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--workers", type=int, default=8, help="DataLoader workers for per-frame preparation (0 = in-process)")
     args = parser.parse_args()
     if args.frame_stride < 1:
         parser.error("--frame-stride must be >= 1")
@@ -189,7 +207,7 @@ def main():
     output = Path(args.artifacts_root) / "tf_metrics" / (
         f"{args.variant}_{args.method}{stage_tag}_seed{args.seed}_{args.suite}_{args.split}")
     results = run_suite(model, config, args.root, ids, suite, args.seed, output,
-                        args.frame_stride, args.batch_size, device)
+                        args.frame_stride, args.batch_size, device, args.workers)
     summary = {"variant": args.variant, "method": args.method, "suite": args.suite,
                "split": args.split, "seed": args.seed, "frame_stride": args.frame_stride,
                "n_samples": len(ids[::args.frame_stride]), "device": device,

@@ -314,3 +314,15 @@ Assumptions and choices made during implementation, with the reason. Dates are a
   not reach the released model on representative validation; for InterFuser the primary gate comparison
   becomes gate-only (PG/PGS/PGT, fusion frozen) vs B0, joint methods vs B2 secondary; TransFuser keeps joint
   methods vs B2 as primary (fine-tuning helps there: validation clean 0.57 → ~0.80).
+
+## 2026-10-18 (test-v2 evaluation)
+
+- **TransFuser evaluation parallelised before any comparison was computed.** The first test-v2 run of the
+  released TransFuser needed ~11 min per condition (~7–8 h per model, weeks for the ~70 TransFuser models)
+  because every frame was prepared in one process. Per-frame preparation (loading, corruption, BEV histogram,
+  ground-truth heatmap) now runs in DataLoader workers (`--workers`, default 8) with batch 16: ~48 s per
+  condition (≈13× faster). Check on the reduced suite against the stopped run: heatmap peak AP 0.552791 vs
+  0.552791, AP@1m 0.701217 vs 0.701237 (floating-point difference from the batch size). The pre-registered
+  suite and frame stride are unchanged. `scripts/run_journal_test.sh` skips evaluations whose `metrics.json`
+  exists and runs `TEST_LANES` evaluations in parallel (4 used). At the time of the change only the released
+  models had test outputs; no method comparison had been computed.
