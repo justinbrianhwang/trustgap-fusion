@@ -1,4 +1,18 @@
-# RRF-InterFuser — reliability-aware robust fusion (research scaffold)
+# TrustGap — when does sensor reliability make fusion more robust?
+
+<p align="center">
+  <img src="docs/assets/trustgap_overview.png" alt="TrustGap overview: degraded camera/LiDAR inputs, InterFuser and TransFuser, a reliability estimator and gate, and the S1–S4 diagnostic chain" width="100%">
+</p>
+
+TrustGap tests whether an input-only estimate of camera/LiDAR reliability, used to gate attention,
+makes two fusion models (InterFuser and TransFuser) more robust under synthetic sensor degradation
+in CARLA — and, where it does not, which link of the chain breaks: **S1** estimation, **S2** marginal
+utility, **S3** gate effect or **S4** final gain against matched controls. The study design is
+pre-registered in [`docs/PREREGISTRATION_JOURNAL.md`](docs/PREREGISTRATION_JOURNAL.md); methods are
+defined in [`docs/METHODS_TABLE.md`](docs/METHODS_TABLE.md) and every deviation is logged in
+[`docs/DECISIONS.md`](docs/DECISIONS.md). The Python package is `rrf`.
+
+## Earlier InterFuser-only study
 
 Question: when camera or LiDAR quality degrades, does steering InterFuser's fusion with a
 task-aware reliability estimate (from the inputs only) make traffic-grid foreground detection more
