@@ -326,3 +326,17 @@ Assumptions and choices made during implementation, with the reason. Dates are a
   suite and frame stride are unchanged. `scripts/run_journal_test.sh` skips evaluations whose `metrics.json`
   exists and runs `TEST_LANES` evaluations in parallel (4 used). At the time of the change only the released
   models had test outputs; no method comparison had been computed.
+
+## 2026-10-24 (test-v2 summary)
+
+- **Crossed bootstrap computed from per-episode ranked-AP tables; ties grouped.** The first summary run
+  recomputed every AP from the raw pooled arrays in each replicate (TransFuser: 3,450 frames × 64 × 64 cells per
+  condition) and had produced no comparison after 30 h; it was stopped. Each AP is now reduced once to
+  per-episode threshold counts (`rrf/ranked_ap.py`), and a replicate's AP is evaluated from the bootstrap
+  episode multiplicities (`stats.crossed_bootstrap_delta_tables`). Resampling, pairing, B0 broadcast and the
+  aggregation order of §7 are unchanged. Equal scores are now one threshold (precision at "score ≥ s"),
+  instead of the order-dependent stable sort, which made duplicated bootstrap episodes depend on their
+  position. On the original data the difference is ~1e-4 AP (TransFuser P seed 0, camera blackout:
+  0.676261 vs 0.676154). Tests: `tests/test_ranked_ap.py` (equal to a direct tie-grouped reference with
+  ties and with duplicated episodes; same bootstrap draws as the previous implementation). No comparison
+  result had been seen before the change.

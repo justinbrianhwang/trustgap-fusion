@@ -1,13 +1,15 @@
 """Apply the pre-registered crossed seed x episode comparisons to saved test predictions."""
 import argparse
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 
-from rrf import common_ap, data, evaluate, metrics, stats, upstream
+from rrf import common_ap, data, evaluate, metrics, objects, stats, upstream
 from rrf.config import load_config
+from rrf.ranked_ap import ranked_ap_table
 from rrf.tf_probes import render_tf_heatmap
 from rrf.transfuser_io import tf_targets
 
@@ -73,9 +75,48 @@ def _tf_labels(dataset_root, sample_ids):
     return np.asarray(labels)
 
 
+def _ranked_table(metric, predictions, labels, sample_ids):
+    if not sample_ids or len(sample_ids) != len(set(sample_ids)):
+        raise ValueError("sample_ids must be non-empty and unique")
+    episodes = sorted({sample_id.split("/", 1)[0] for sample_id in sample_ids})
+    episode_lookup = {episode: index for index, episode in enumerate(episodes)}
+    frame_episode = np.asarray(
+        [episode_lookup[sample_id.split("/", 1)[0]] for sample_id in sample_ids],
+        dtype=np.int32)
+    n_episodes = len(episodes)
+    if metric == "common_vehicle_center_ap_1m":
+        scores, hits, item_episode = [], [], []
+        denom = np.zeros(n_episodes, dtype=np.int64)
+        for episode, detections, truth in zip(frame_episode, predictions, labels):
+            matched, n_gt = objects.match(detections, truth, 1.0)
+            scores.extend(item[0] for item in matched)
+            hits.extend(item[1] for item in matched)
+            item_episode.extend([episode] * len(matched))
+            denom[episode] += n_gt
+    else:
+        scores = np.asarray(predictions)
+        labels = np.asarray(labels)
+        if scores.shape != labels.shape:
+            raise ValueError("predictions and labels must have identical shapes")
+        item_episode = np.repeat(frame_episode, int(np.prod(scores.shape[1:])))
+        if metric == "heatmap_peak_ap":
+            keep = labels.ravel() >= 0
+            scores = scores.ravel()[keep]
+            hits = labels.ravel()[keep] == 1
+            item_episode = item_episode[keep]
+        else:
+            scores = scores.ravel()
+            hits = labels.ravel().astype(bool)
+        denom = np.bincount(item_episode[hits], minlength=n_episodes)
+    table = ranked_ap_table(scores, hits, item_episode, denom, n_episodes)
+    table["episodes"] = tuple(episodes)
+    table["sample_ids"] = tuple(sample_ids)
+    return table
+
+
 def load_crossed_inputs(model, method, metric, kinds, config, standard_root, weak_root,
                         label_cache=None):
-    """Load one method as the seed/condition/sample structure consumed by ``rrf.stats``."""
+    """Build one method's compact ranked-AP tables for the crossed bootstrap."""
     directories = _prediction_dirs(model, method, standard_root, weak_root)
     first = next(iter(directories.values()))
     specs = _condition_specs(first)
@@ -83,13 +124,17 @@ def load_crossed_inputs(model, method, metric, kinds, config, standard_root, wea
                       if evaluate.condition_kind(spec, config["corruption"]) in kinds)
     if not selected:
         raise ValueError(f"no conditions of kinds {kinds} for {model} {method}")
-    output = {}
+    output, reference_ids = {}, None
     label_cache = {} if label_cache is None else label_cache
     for seed, directory in directories.items():
         output[seed] = {}
         for condition in selected:
             with np.load(directory / f"pred_{condition}.npz") as saved:
                 sample_ids = [str(value) for value in saved["sample_ids"]]
+                if reference_ids is None:
+                    reference_ids = sample_ids
+                elif sample_ids != reference_ids:
+                    raise ValueError("all conditions and seeds must use identical sample order")
                 cache_key = (metric, tuple(sample_ids))
                 if cache_key not in label_cache:
                     if metric == "grid_fg_ap":
@@ -114,28 +159,39 @@ def load_crossed_inputs(model, method, metric, kinds, config, standard_root, wea
                     counts = saved["box_counts"]
                     predictions = _object_array([common_ap.transfuser_detections(value, count)
                                                  for value, count in zip(saved["boxes"], counts)])
-            output[seed][condition] = {"sample_ids": sample_ids, "predictions": predictions,
-                                       "labels": label_cache[cache_key]}
+            output[seed][condition] = _ranked_table(
+                metric, predictions, label_cache[cache_key], sample_ids)
     return output
 
 
-def run_comparisons(spec, config, standard_root, weak_root, repeats=2000, seed=0):
-    label_cache, rows = {}, []
+def run_comparisons(spec, config, standard_root, weak_root, repeats=2000, seed=0,
+                    only_family=None):
+    label_cache, table_cache, rows = {}, {}, []
     for index, comparison in enumerate(spec):
         missing = {"model", "method", "baseline", "metric", "kinds", "delta", "family"} - set(comparison)
         if missing:
             raise ValueError(f"comparison {index} missing {sorted(missing)}")
         if comparison["metric"] not in METRICS:
             raise ValueError(f"unsupported metric {comparison['metric']!r}")
+        if only_family and only_family not in comparison["family"]:
+            continue
         for kind in comparison["kinds"]:
+            started = time.perf_counter()
             inputs = []
             for method in (comparison["baseline"], comparison["method"]):
-                inputs.append(load_crossed_inputs(
-                    comparison["model"], method, comparison["metric"], [kind], config,
-                    standard_root, weak_root, label_cache))
-            result = stats.crossed_bootstrap_delta(
-                inputs[0], inputs[1], METRICS[comparison["metric"]], n=repeats, seed=seed + index)
+                key = (comparison["model"], method, comparison["metric"], kind)
+                if key not in table_cache:  # methods recur across comparisons; tables are small
+                    table_cache[key] = load_crossed_inputs(
+                        comparison["model"], method, comparison["metric"], [kind], config,
+                        standard_root, weak_root, label_cache)
+                inputs.append(table_cache[key])
+            result = stats.crossed_bootstrap_delta_tables(
+                inputs[0], inputs[1], n=repeats, seed=seed + index)
             rows.append({**comparison, "kind": kind, "result": result})
+            print(f"[{comparison['family']}] {comparison['method']} - "
+                  f"{comparison['baseline']} {kind}: {time.perf_counter() - started:.1f}s",
+                  flush=True)
+            del inputs
     for family in sorted({row["family"] for row in rows}):
         members = [row for row in rows if row["family"] == family]
         adjusted = stats.holm_on_cis([row["result"] for row in members])
@@ -161,16 +217,20 @@ def main():
     parser.add_argument("--repeats", type=int)
     parser.add_argument("--seed", type=int, default=20261018)
     parser.add_argument("--output")
+    parser.add_argument("--only-family", help="run comparisons whose family contains this substring")
     args = parser.parse_args()
     config = load_config(args.config)
     standard_root = Path(args.artifacts_root or config["paths"]["artifacts_root"])
     weak_root = Path(args.weak_artifacts_root)
     spec = json.loads(Path(args.comparisons).read_text())
     repeats = args.repeats or config["metrics"]["bootstrap_repeats"]
-    rows = run_comparisons(spec, config, standard_root, weak_root, repeats, args.seed)
+    rows = run_comparisons(spec, config, standard_root, weak_root, repeats, args.seed,
+                           args.only_family)
     output = Path(args.output or standard_root / "metrics" / "journal_summary.json")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps({"repeats": repeats, "comparisons": rows}, indent=2))
+    output.write_text(json.dumps({"repeats": repeats,
+                                  "ap_definition": "tie-grouped (score >= threshold)",
+                                  "comparisons": rows}, indent=2))
     lines = ["# Journal confirmatory comparisons", "",
              "| model | method - baseline | metric | kind | delta | CI95 | CI90 | Holm p | verdict |",
              "|---|---|---|---|---:|---|---|---:|---|"]

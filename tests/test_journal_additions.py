@@ -11,6 +11,7 @@ from rrf.config import ConfigError, load_config, validate
 from rrf.tools.select_checkpoint import load_test_ap, select_from_log
 from rrf.tools import journal_summary
 from rrf.tools.journal_summary import tf_peak_ap
+from rrf.ranked_ap import ranked_ap_table
 from rrf.train import sample_condition
 
 
@@ -125,20 +126,20 @@ def test_journal_tf_peak_metric_ignores_gaussian_tails():
 
 
 def test_journal_summary_applies_declared_holm_family(monkeypatch):
-    ids = ["ep0/0", "ep1/0"]
-
     def fake_inputs(_model, method, _metric, kinds, *_args):
-        shift = 1.0 if method == "P" else 0.0
-        return {seed: {kinds[0]: {"sample_ids": ids,
-                                  "predictions": np.array([shift, shift]),
-                                  "labels": np.zeros(2)}} for seed in (0, 1)}
+        scores = [1.0, 0.0, 1.0, 0.0] if method == "P" else [0.0, 1.0, 0.0, 1.0]
+        output = {}
+        for seed in (0, 1):
+            table = ranked_ap_table(scores, [True, False, True, False],
+                                    [0, 0, 1, 1], [1, 1], 2)
+            table["episodes"] = ("ep0", "ep1")
+            output[seed] = {kinds[0]: table}
+        return output
 
     monkeypatch.setattr(journal_summary, "load_crossed_inputs", fake_inputs)
     comparison = {"model": "interfuser", "method": "P", "baseline": "B2",
                   "metric": "grid_fg_ap", "kinds": ["seen", "mixed"],
                   "delta": 0.02, "family": "P_vs_B2"}
-    monkeypatch.setitem(journal_summary.METRICS, "grid_fg_ap",
-                        lambda predictions, _labels: np.mean(predictions))
     rows = journal_summary.run_comparisons([comparison], {}, "a", "b", repeats=20, seed=1)
     assert len(rows) == 2
     assert all(row["result"]["holm_reject_zero"] for row in rows)

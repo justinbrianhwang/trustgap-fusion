@@ -4,6 +4,8 @@ from collections import Counter
 
 import numpy as np
 
+from rrf.ranked_ap import ranked_ap
+
 
 def _by_episode(rows):
     groups = defaultdict(list)
@@ -183,6 +185,73 @@ def crossed_bootstrap_delta(pred_a, pred_b, metric_fn, n=2000, seed=0):
         bb = [b_keys[index] for index in selected_pairs]
         values[repeat] = (_crossed_stat(pred_b, bb, conditions, indices, metric_fn) -
                           _crossed_stat(pred_a, aa, conditions, indices, metric_fn))
+    return {
+        "delta": float(delta),
+        "ci95": [float(x) for x in np.percentile(values, (2.5, 97.5))],
+        "ci90": [float(x) for x in np.percentile(values, (5.0, 95.0))],
+        "n_seeds": len(pairs), "n_episodes": len(episodes), "repeats": int(n),
+        "bootstrap_deltas": values.tolist(),
+    }
+
+
+def _validate_crossed_tables(tables_a, tables_b):
+    pairs = _seed_pairs(tables_a, tables_b)
+    first = tables_a[pairs[0][0]]
+    conditions = sorted(first)
+    if not conditions:
+        raise ValueError("at least one condition is required")
+    reference = first[conditions[0]]
+    n_episodes = reference["n_episodes"]
+    episodes = tuple(reference.get("episodes", range(n_episodes)))
+    sample_ids = reference.get("sample_ids")
+    if len(episodes) != n_episodes:
+        raise ValueError("episode list must have n_episodes entries")
+    for method in (tables_a, tables_b):
+        for seed_tables in method.values():
+            if sorted(seed_tables) != conditions:
+                raise ValueError("all seeds and methods must contain identical conditions")
+            for condition in conditions:
+                table = seed_tables[condition]
+                table_episodes = tuple(table.get("episodes", range(table["n_episodes"])))
+                if table["n_episodes"] != n_episodes or table_episodes != episodes:
+                    raise ValueError("all conditions, seeds, and methods must use identical episodes")
+                if sample_ids is not None and table.get("sample_ids") != sample_ids:
+                    raise ValueError("all conditions, seeds, and methods must use identical samples")
+    return pairs, conditions, episodes
+
+
+def _crossed_table_stat(method, seed_keys, conditions, weights):
+    seed_values = []
+    for seed in seed_keys:
+        condition_values = []
+        for condition in conditions:
+            value = ranked_ap(method[seed][condition], weights)
+            if value is None or not np.isfinite(value):
+                raise ValueError(f"metric is undefined for condition {condition!r}")
+            condition_values.append(float(value))
+        seed_values.append(float(np.mean(condition_values)))
+    return float(np.mean(seed_values))
+
+
+def crossed_bootstrap_delta_tables(tables_a, tables_b, n=2000, seed=0):
+    """Crossed seed x episode bootstrap using precomputed ranked-AP tables."""
+    if n < 1:
+        raise ValueError("n must be positive")
+    pairs, conditions, episodes = _validate_crossed_tables(tables_a, tables_b)
+    a_keys, b_keys = zip(*pairs)
+    original = np.ones(len(episodes), dtype=np.int64)
+    delta = (_crossed_table_stat(tables_b, b_keys, conditions, original) -
+             _crossed_table_stat(tables_a, a_keys, conditions, original))
+    rng = np.random.default_rng(seed)
+    values = np.empty(n, dtype=np.float64)
+    for repeat in range(n):
+        selected_pairs = rng.integers(0, len(pairs), size=len(pairs))
+        selected_episodes = rng.integers(0, len(episodes), size=len(episodes))
+        weights = np.bincount(selected_episodes, minlength=len(episodes))
+        aa = [a_keys[index] for index in selected_pairs]
+        bb = [b_keys[index] for index in selected_pairs]
+        values[repeat] = (_crossed_table_stat(tables_b, bb, conditions, weights) -
+                          _crossed_table_stat(tables_a, aa, conditions, weights))
     return {
         "delta": float(delta),
         "ci95": [float(x) for x in np.percentile(values, (2.5, 97.5))],
